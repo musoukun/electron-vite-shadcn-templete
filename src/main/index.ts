@@ -7,6 +7,17 @@ import {
 	SystemMessage,
 } from "@langchain/core/messages";
 
+// コンソール出力のエンコーディングを設定（Windows環境用）
+if (process.platform === "win32") {
+	process.env.LANG = "ja_JP.UTF-8";
+	// Windows環境でのコンソール出力をUTF-8に設定
+	try {
+		require("child_process").execSync("chcp 65001", { stdio: "ignore" });
+	} catch (e) {
+		console.error("コンソールのエンコーディング設定に失敗しました:", e);
+	}
+}
+
 // アプリのウィンドウを格納するグローバル参照
 // これをしないとGCされてしまいます
 let mainWindow: BrowserWindow | null = null;
@@ -19,7 +30,7 @@ let chatHistory: Array<HumanMessage | AIMessage | SystemMessage> = [];
 // LLMの初期化関数
 function initializeLLM() {
 	if (!apiKey) {
-		console.log("API Keyが設定されていません");
+		logInfo("API Keyが設定されていません");
 		return false;
 	}
 
@@ -42,14 +53,14 @@ function initializeLLM() {
 
 		return true;
 	} catch (error) {
-		console.error("LLMの初期化に失敗しました:", error);
+		logError("LLMの初期化に失敗しました:", error);
 		return false;
 	}
 }
 
 // メインウィンドウを作成する関数
 function createWindow(): void {
-	console.log("Creating main window...");
+	logInfo("Creating main window...");
 
 	mainWindow = new BrowserWindow({
 		width: 1200,
@@ -123,7 +134,7 @@ ipcMain.handle("dialog:openFile", async () => {
 
 // LLMメッセージ送信ハンドラー
 ipcMain.handle("llm:sendMessage", async (_event, message: string) => {
-	console.log(`LLMにメッセージを送信: ${message}`);
+	logInfo(`LLMにメッセージを送信: ${message}`);
 
 	if (!chatModel) {
 		if (!initializeLLM()) {
@@ -144,14 +155,14 @@ ipcMain.handle("llm:sendMessage", async (_event, message: string) => {
 
 		return response.content;
 	} catch (error) {
-		console.error("LLMとの通信中にエラーが発生しました:", error);
+		logError("LLMとの通信中にエラーが発生しました:", error);
 		return "エラーが発生しました。しばらくしてからもう一度お試しください。";
 	}
 });
 
 // APIキー設定ハンドラー
 ipcMain.handle("llm:setApiKey", async (_event, newApiKey: string) => {
-	console.log("APIキーを設定します");
+	logInfo("APIキーを設定します");
 
 	try {
 		apiKey = newApiKey;
@@ -192,5 +203,25 @@ ipcMain.handle("llm:setApiKey", async (_event, newApiKey: string) => {
 // 設定ダイアログを開くハンドラー
 ipcMain.on("open-settings-dialog", () => {
 	// 設定ダイアログの実装は後で追加
-	console.log("設定ダイアログを開きます");
+	logInfo("設定ダイアログを開きます");
 });
+
+// ログ出力用の関数
+function logInfo(message: string): void {
+	// Windows環境では文字化けを防ぐためにバッファを使用
+	if (process.platform === "win32") {
+		const buffer = Buffer.from(message, "utf8");
+		console.log(buffer.toString("utf8"));
+	} else {
+		console.log(message);
+	}
+}
+
+function logError(message: string, error?: any): void {
+	if (process.platform === "win32") {
+		const buffer = Buffer.from(message, "utf8");
+		console.error(buffer.toString("utf8"), error || "");
+	} else {
+		console.error(message, error || "");
+	}
+}
