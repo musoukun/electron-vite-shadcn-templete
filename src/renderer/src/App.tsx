@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -8,12 +8,13 @@ import {
 	CardContent,
 	CardFooter,
 } from "@/components/ui/card";
-import { Send, Menu, User } from "lucide-react";
+import { Send, Menu, User, Settings } from "lucide-react";
 import {
 	Sidebar,
 	SidebarProvider,
 	SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { ApiKeyDialog } from "@/components/ApiKeyDialog";
 
 function App() {
 	const [message, setMessage] = useState("");
@@ -21,6 +22,32 @@ function App() {
 		{ role: string; content: string }[]
 	>([]);
 	const [isLoading, setIsLoading] = useState(false);
+	const [isApiKeyDialogOpen, setIsApiKeyDialogOpen] = useState(false);
+
+	// APIキー更新イベントのリスナーを設定
+	useEffect(() => {
+		const unsubscribe = window.electronAPI.onApiKeyUpdate((result) => {
+			if (result.success) {
+				// 成功メッセージを表示
+				const successMessage = {
+					role: "system",
+					content: "APIキーが正常に設定されました。",
+				};
+				setChatHistory((prev) => [...prev, successMessage]);
+			} else {
+				// エラーメッセージを表示
+				const errorMessage = {
+					role: "system",
+					content: `APIキーの設定に失敗しました: ${result.message}`,
+				};
+				setChatHistory((prev) => [...prev, errorMessage]);
+			}
+		});
+
+		return () => {
+			if (unsubscribe) unsubscribe();
+		};
+	}, []);
 
 	const handleSendMessage = async () => {
 		if (!message.trim() || isLoading) return;
@@ -32,7 +59,7 @@ function App() {
 		setChatHistory((prev) => [...prev, userMessage]);
 
 		try {
-			// electronAPI.sendMessageToLLM は preload で定義されたもの
+			// LLMにメッセージを送信
 			const response = await window.electronAPI.sendMessageToLLM(message);
 
 			// AIの応答をチャット履歴に追加
@@ -91,18 +118,27 @@ function App() {
 						</div>
 						{/* アカウント情報 */}
 						<div className="p-4 border-t mt-auto">
-							<div className="flex items-center gap-2">
-								<div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground">
-									<User size={16} />
+							<div className="flex items-center justify-between">
+								<div className="flex items-center gap-2">
+									<div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground">
+										<User size={16} />
+									</div>
+									<div>
+										<p className="text-sm font-medium">
+											ユーザー
+										</p>
+										<p className="text-xs text-muted-foreground">
+											Gemini Pro
+										</p>
+									</div>
 								</div>
-								<div>
-									<p className="text-sm font-medium">
-										ユーザー
-									</p>
-									<p className="text-xs text-muted-foreground">
-										ローカルLLM
-									</p>
-								</div>
+								<Button
+									variant="ghost"
+									size="icon"
+									onClick={() => setIsApiKeyDialogOpen(true)}
+								>
+									<Settings className="h-4 w-4" />
+								</Button>
 							</div>
 						</div>
 					</div>
@@ -177,6 +213,11 @@ function App() {
 					</div>
 				</div>
 			</div>
+
+			<ApiKeyDialog
+				open={isApiKeyDialogOpen}
+				onOpenChange={setIsApiKeyDialogOpen}
+			/>
 		</SidebarProvider>
 	);
 }
