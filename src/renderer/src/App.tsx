@@ -8,8 +8,12 @@ import {
 	CardContent,
 	CardFooter,
 } from "@/components/ui/card";
-import { Send } from "lucide-react";
-import { Sidebar, SidebarProvider } from "@/components/ui/sidebar";
+import { Send, Menu, User } from "lucide-react";
+import {
+	Sidebar,
+	SidebarProvider,
+	SidebarTrigger,
+} from "@/components/ui/sidebar";
 
 function App() {
 	const [message, setMessage] = useState("");
@@ -55,10 +59,66 @@ function App() {
 	return (
 		<SidebarProvider>
 			<div className="flex h-screen w-full">
-				<Sidebar className="w-64 border-r shrink-0" />
+				<Sidebar className="w-64 border-r shrink-0">
+					{/* サイドバーのコンテンツ */}
+					<div className="flex flex-col h-full">
+						<div className="p-4 border-b">
+							<h2 className="text-lg font-semibold">会話履歴</h2>
+						</div>
+						<div className="flex-1 overflow-auto p-2">
+							{/* 会話履歴のリストをここに表示 */}
+							<div className="space-y-1">
+								<Button
+									variant="ghost"
+									className="w-full justify-start"
+								>
+									<span>新しい会話</span>
+								</Button>
+								{/* 過去の会話リスト（サンプル） */}
+								<Button
+									variant="ghost"
+									className="w-full justify-start text-sm"
+								>
+									<span>会話 1</span>
+								</Button>
+								<Button
+									variant="ghost"
+									className="w-full justify-start text-sm"
+								>
+									<span>会話 2</span>
+								</Button>
+							</div>
+						</div>
+						{/* アカウント情報 */}
+						<div className="p-4 border-t mt-auto">
+							<div className="flex items-center gap-2">
+								<div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground">
+									<User size={16} />
+								</div>
+								<div>
+									<p className="text-sm font-medium">
+										ユーザー
+									</p>
+									<p className="text-xs text-muted-foreground">
+										ローカルLLM
+									</p>
+								</div>
+							</div>
+						</div>
+					</div>
+				</Sidebar>
 
 				<div className="flex-1 flex flex-col w-full overflow-hidden">
-					<div className="p-4 border-b">
+					<div className="p-4 border-b flex items-center">
+						<SidebarTrigger>
+							<Button
+								variant="ghost"
+								size="icon"
+								className="mr-2"
+							>
+								<Menu className="h-5 w-5" />
+							</Button>
+						</SidebarTrigger>
 						<h1 className="text-xl font-bold">LLMクライアント</h1>
 					</div>
 
