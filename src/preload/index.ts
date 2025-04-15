@@ -6,20 +6,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
 	openFile: () => ipcRenderer.invoke("dialog:openFile"),
 
 	// LLMとの通信機能
-	sendMessageToLLM: (message: string) =>
-		ipcRenderer.invoke("llm:sendMessage", message),
-
-	// 設定関連
-	openSettingsDialog: () => ipcRenderer.send("open-settings-dialog"),
-	setApiKey: (apiKey: string) => ipcRenderer.invoke("llm:setApiKey", apiKey),
-
-	// イベントリスナー
-	onApiKeyUpdate: (
-		callback: (result: { success: boolean; message: string }) => void
-	) => {
-		ipcRenderer.on("api-key-update", (_event, result) => callback(result));
-		return () => {
-			ipcRenderer.removeAllListeners("api-key-update");
-		};
-	},
+	sendMessageToLLM: (message: string, agentId?: string) =>
+		ipcRenderer.invoke("llm:sendMessage", message, agentId),
+		
+	// エージェント一覧を取得
+	getAgents: () => ipcRenderer.invoke("llm:getAgents"),
+	
+	// モデル関連
+	getAvailableModels: () => ipcRenderer.invoke("llm:getAvailableModels"),
+	selectModel: (modelId: string) => 
+		ipcRenderer.invoke("llm:selectModel", modelId),
+	getSelectedModel: () => 
+		ipcRenderer.invoke("llm:getSelectedModel"),
 });

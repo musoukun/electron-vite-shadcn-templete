@@ -6,15 +6,20 @@ import {
 	CardHeader,
 	CardTitle,
 	CardContent,
-	CardFooter,
 } from "@/components/ui/card";
-import { Send, Menu, User, Settings } from "lucide-react";
+import { Send, Menu, User, Settings, RefreshCw } from "lucide-react";
 import {
 	Sidebar,
 	SidebarProvider,
 	SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { ApiKeyDialog } from "@/components/ApiKeyDialog";
+import { ModelSelectDialog } from "@/components/ModelSelectDialog";
+
+// エージェントの型定義
+interface Agent {
+	id: string;
+	name: string;
+}
 
 function App() {
 	const [message, setMessage] = useState("");
@@ -22,40 +27,91 @@ function App() {
 		{ role: string; content: string }[]
 	>([]);
 	const [isLoading, setIsLoading] = useState(false);
-	const [isApiKeyDialogOpen, setIsApiKeyDialogOpen] = useState(false);
+	const [isModelSelectDialogOpen, setIsModelSelectDialogOpen] = useState(false);
+	const [agents, setAgents] = useState<Agent[]>([]);
+	const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+	const [selectedModel, setSelectedModel] = useState<string | null>(null);
 
-	// APIキー更新イベントのリスナーを設定
+	// 利用可能なエージェントを取得
+	const fetchAgents = async () => {
+		try {
+			if (window.electronAPI?.getAgents) {
+				const response = await window.electronAPI.getAgents();
+				if (response && Array.isArray(response)) {
+					setAgents(response);
+					// デフォルトでchatAgentを選択（存在すれば）
+					const defaultAgent = response.find(agent => agent.id === "chatAgent") || response[0];
+					if (defaultAgent) {
+						setSelectedAgent(defaultAgent);
+					}
+				}
+			}
+		} catch (error) {
+			console.error("エージェント一覧の取得に失敗しました:", error);
+		}
+	};
+
+	// 選択されたモデルを取得
+	const getSelectedModel = async () => {
+		try {
+			if (window.electronAPI?.getSelectedModel) {
+				const model = await window.electronAPI.getSelectedModel();
+				setSelectedModel(model);
+				return model;
+			}
+		} catch (error) {
+			console.error("選択されたモデルの取得に失敗しました:", error);
+		}
+		return null;
+	};
+
+	// コンポーネントマウント時に初期化
 	useEffect(() => {
-		// window.electronAPI が存在するか確認してから処理を実行
-		if (window.electronAPI?.onApiKeyUpdate) {
-			const unsubscribe = window.electronAPI.onApiKeyUpdate((result) => {
+		const initializeApp = async () => {
+			await fetchAgents();
+			await getSelectedModel();
+		};
+		
+		initializeApp();
+	}, []);
+
+	// モデルが選択されたときの処理
+	const handleModelSelect = async (modelId: string) => {
+		try {
+			if (window.electronAPI?.selectModel) {
+				const result = await window.electronAPI.selectModel(modelId);
 				if (result.success) {
-					// 成功メッセージを表示
-					const successMessage = {
+					setSelectedModel(modelId);
+					
+					// モデル変更のシステムメッセージを表示
+					const modelMessage = {
 						role: "system",
-						content: "APIキーが正常に設定されました。",
+						content: `モデルを「${modelId}」に変更しました。`,
 					};
-					setChatHistory((prev) => [...prev, successMessage]);
+					setChatHistory((prev) => [...prev, modelMessage]);
 				} else {
 					// エラーメッセージを表示
 					const errorMessage = {
 						role: "system",
-						content: `APIキーの設定に失敗しました: ${result.message}`,
+						content: `モデルの選択に失敗しました: ${result.message}`,
 					};
 					setChatHistory((prev) => [...prev, errorMessage]);
 				}
-			});
-
-			return () => {
-				if (unsubscribe) unsubscribe();
+			}
+		} catch (error) {
+			console.error("モデルの選択中にエラーが発生しました:", error);
+			// エラーメッセージを表示
+			const errorMessage = {
+				role: "system",
+				content: "モデルの選択中にエラーが発生しました。",
 			};
+			setChatHistory((prev) => [...prev, errorMessage]);
 		}
-		// electronAPI が存在しない場合は何もしない
-		return undefined;
-	}, []);
+	};
 
+	// メッセージ送信処理
 	const handleSendMessage = async () => {
-		if (!message.trim() || isLoading) return;
+		if (!message.trim() || isLoading || !selectedAgent) return;
 
 		setIsLoading(true);
 
@@ -66,9 +122,9 @@ function App() {
 		try {
 			// window.electronAPI が存在するか確認
 			if (window.electronAPI?.sendMessageToLLM) {
-				// LLMにメッセージを送信
+				// 選択されたエージェントにメッセージを送信
 				const response =
-					await window.electronAPI.sendMessageToLLM(message);
+					await window.electronAPI.sendMessageToLLM(message, selectedAgent.id);
 
 				// AIの応答をチャット履歴に追加
 				const aiMessage = { role: "assistant", content: response };
@@ -100,6 +156,11 @@ function App() {
 		}
 	};
 
+	// 会話をクリア
+	const clearConversation = () => {
+		setChatHistory([]);
+	};
+
 	return (
 		<SidebarProvider>
 			<div className="flex h-screen w-full">
@@ -107,7 +168,12 @@ function App() {
 					{/* サイドバーのコンテンツ */}
 					<div className="flex flex-col h-full">
 						<div className="p-4 border-b">
-							<h2 className="text-lg font-semibold">会話履歴</h2>
+							<h2 className="text-lg font-semibold">会話</h2>
+							{selectedModel && (
+								<p className="text-xs text-muted-foreground mt-1">
+									モデル: {selectedModel}
+								</p>
+							)}
 						</div>
 						<div className="flex-1 overflow-auto p-2">
 							{/* 会話履歴のリストをここに表示 */}
@@ -115,48 +181,22 @@ function App() {
 								<Button
 									variant="ghost"
 									className="w-full justify-start"
+									onClick={clearConversation}
 								>
-									<span>新しい会話</span>
-								</Button>
-								{/* 過去の会話リスト（サンプル） */}
-								<Button
-									variant="ghost"
-									className="w-full justify-start text-sm"
-								>
-									<span>会話 1</span>
-								</Button>
-								<Button
-									variant="ghost"
-									className="w-full justify-start text-sm"
-								>
-									<span>会話 2</span>
+									<span>会話をクリア</span>
 								</Button>
 							</div>
 						</div>
-						{/* アカウント情報 */}
+						{/* モデル選択ボタン */}
 						<div className="p-4 border-t mt-auto">
-							<div className="flex items-center justify-between">
-								<div className="flex items-center gap-2">
-									<div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-primary-foreground">
-										<User size={16} />
-									</div>
-									<div>
-										<p className="text-sm font-medium">
-											ユーザー
-										</p>
-										<p className="text-xs text-muted-foreground">
-											Gemini Pro
-										</p>
-									</div>
-								</div>
-								<Button
-									variant="ghost"
-									size="icon"
-									onClick={() => setIsApiKeyDialogOpen(true)}
-								>
-									<Settings className="h-4 w-4" />
-								</Button>
-							</div>
+							<Button
+								variant="outline"
+								className="w-full flex items-center justify-center gap-2"
+								onClick={() => setIsModelSelectDialogOpen(true)}
+							>
+								<RefreshCw className="h-4 w-4" />
+								<span>モデルを変更</span>
+							</Button>
 						</div>
 					</div>
 				</Sidebar>
@@ -173,6 +213,20 @@ function App() {
 							</Button>
 						</SidebarTrigger>
 						<h1 className="text-xl font-bold">LLMクライアント</h1>
+						
+						{/* 現在のエージェントとモデルの表示 */}
+						<div className="ml-auto flex items-center gap-2">
+							{selectedAgent && (
+								<div className="text-sm">
+									エージェント: <span className="font-medium">{selectedAgent.name}</span>
+								</div>
+							)}
+							{selectedModel && (
+								<div className="text-sm ml-2">
+									モデル: <span className="font-medium">{selectedModel}</span>
+								</div>
+							)}
+						</div>
 					</div>
 
 					<div className="flex-1 p-4 overflow-auto">
@@ -185,7 +239,7 @@ function App() {
 								chatHistory.map((chat, index) => (
 									<Card
 										key={index}
-										className={`${chat.role === "user" ? "bg-muted" : ""}`}
+										className={`${chat.role === "user" ? "bg-muted" : chat.role === "system" ? "bg-blue-50 border-blue-200" : ""}`}
 									>
 										<CardHeader className="py-2">
 											<CardTitle className="text-sm">
@@ -230,10 +284,12 @@ function App() {
 					</div>
 				</div>
 			</div>
-
-			<ApiKeyDialog
-				open={isApiKeyDialogOpen}
-				onOpenChange={setIsApiKeyDialogOpen}
+			
+			{/* モデル選択ダイアログ */}
+			<ModelSelectDialog
+				open={isModelSelectDialogOpen}
+				onOpenChange={setIsModelSelectDialogOpen}
+				onModelSelect={handleModelSelect}
 			/>
 		</SidebarProvider>
 	);

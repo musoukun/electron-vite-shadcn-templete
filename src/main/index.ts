@@ -1,11 +1,6 @@
 import { app, BrowserWindow, ipcMain, dialog } from "electron";
 import path from "path";
-import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import {
-	HumanMessage,
-	AIMessage,
-	SystemMessage,
-} from "@langchain/core/messages";
+import axios from "axios";
 
 // コンソール出力のエンコーディングを設定（Windows環境用）
 if (process.platform === "win32") {
@@ -18,45 +13,15 @@ if (process.platform === "win32") {
 	}
 }
 
+// Mastra API の設定
+const MASTRA_API_BASE_URL = "http://localhost:4111/api";
+
 // アプリのウィンドウを格納するグローバル参照
 // これをしないとGCされてしまいます
 let mainWindow: BrowserWindow | null = null;
 
-// LLMの設定
-let apiKey: string | null = null;
-let chatModel: ChatGoogleGenerativeAI | null = null;
-let chatHistory: Array<HumanMessage | AIMessage | SystemMessage> = [];
-
-// LLMの初期化関数
-function initializeLLM() {
-	if (!apiKey) {
-		logInfo("API Keyが設定されていません");
-		return false;
-	}
-
-	try {
-		chatModel = new ChatGoogleGenerativeAI({
-			apiKey: apiKey,
-			model: "gemini-2.0-flash-exp",
-			maxOutputTokens: 1025,
-			temperature: 0,
-			topK: 1,
-			topP: 1,
-		});
-
-		// システムメッセージで会話を初期化
-		chatHistory = [
-			new SystemMessage(
-				"あなたは親切なAIアシスタントです。ユーザーの質問に簡潔に答えてください。"
-			),
-		];
-
-		return true;
-	} catch (error) {
-		logError("LLMの初期化に失敗しました:", error);
-		return false;
-	}
-}
+// 選択されたモデル
+let selectedModel: string = "gemini-2.0-flash-exp"; // デフォルトモデル
 
 // メインウィンドウを作成する関数
 function createWindow(): void {
@@ -132,79 +97,79 @@ ipcMain.handle("dialog:openFile", async () => {
 	}
 });
 
-// LLMメッセージ送信ハンドラー
-ipcMain.handle("llm:sendMessage", async (_event, message: string) => {
-	logInfo(`LLMにメッセージを送信: ${message}`);
-
-	if (!chatModel) {
-		if (!initializeLLM()) {
-			return "APIキーが設定されていないか、LLMの初期化に失敗しました。設定から適切なAPIキーを設定してください。";
-		}
-	}
-
+// エージェント一覧を取得
+ipcMain.handle("llm:getAgents", async () => {
 	try {
-		// ユーザーメッセージを履歴に追加
-		const userMessage = new HumanMessage(message);
-		chatHistory.push(userMessage);
-
-		// LLMに送信して応答を取得
-		const response = await chatModel!.invoke(chatHistory);
-
-		// AIの応答を履歴に追加
-		chatHistory.push(response);
-
-		return response.content;
+		const response = await axios.get(`${MASTRA_API_BASE_URL}/agents`);
+		return response.data;
 	} catch (error) {
-		logError("LLMとの通信中にエラーが発生しました:", error);
-		return "エラーが発生しました。しばらくしてからもう一度お試しください。";
+		logError("エージェント一覧の取得に失敗しました:", error);
+		return { error: "エージェント一覧の取得に失敗しました" };
 	}
 });
 
-// APIキー設定ハンドラー
-ipcMain.handle("llm:setApiKey", async (_event, newApiKey: string) => {
-	logInfo("APIキーを設定します");
+// 利用可能なモデル一覧（実際のAPIから取得できれば理想的）
+const AVAILABLE_MODELS = [
+	{ id: "gemini-pro", name: "Gemini Pro" },
+	{ id: "gemini-1.5-pro", name: "Gemini 1.5 Pro" },
+	{ id: "gemini-1.5-flash", name: "Gemini 1.5 Flash" },
+	{ id: "gemini-2.0-pro", name: "Gemini 2.0 Pro" },
+	{ id: "gemini-2.0-flash-exp", name: "Gemini 2.0 Flash exp" },
+];
 
+// 利用可能なモデル一覧を取得
+ipcMain.handle("llm:getAvailableModels", async () => {
+	return AVAILABLE_MODELS;
+});
+
+// モデルを選択
+ipcMain.handle("llm:selectModel", async (_event, modelId: string) => {
 	try {
-		apiKey = newApiKey;
-		const success = initializeLLM();
-
-		if (success) {
-			if (mainWindow) {
-				mainWindow.webContents.send("api-key-update", {
-					success: true,
-					message: "APIキーが正常に設定されました",
-				});
-			}
-			return { success: true, message: "APIキーが正常に設定されました" };
-		} else {
-			if (mainWindow) {
-				mainWindow.webContents.send("api-key-update", {
-					success: false,
-					message: "APIキーの設定に失敗しました",
-				});
-			}
-			return { success: false, message: "APIキーの設定に失敗しました" };
-		}
+		selectedModel = modelId;
+		logInfo(`モデルを選択しました: ${modelId}`);
+		return { success: true, message: `モデル ${modelId} を選択しました` };
 	} catch (error) {
-		console.error("APIキーの設定中にエラーが発生しました:", error);
-		if (mainWindow) {
-			mainWindow.webContents.send("api-key-update", {
-				success: false,
-				message: "APIキーの設定中にエラーが発生しました",
-			});
-		}
+		logError("モデルの選択中にエラーが発生しました:", error);
 		return {
 			success: false,
-			message: "APIキーの設定中にエラーが発生しました",
+			message: "モデルの選択中にエラーが発生しました",
 		};
 	}
 });
 
-// 設定ダイアログを開くハンドラー
-ipcMain.on("open-settings-dialog", () => {
-	// 設定ダイアログの実装は後で追加
-	logInfo("設定ダイアログを開きます");
+// 選択されたモデルを取得
+ipcMain.handle("llm:getSelectedModel", async () => {
+	return selectedModel;
 });
+
+// メッセージ送信ハンドラー
+ipcMain.handle(
+	"llm:sendMessage",
+	async (_event, message: string, agentId: string = "chatAgent") => {
+		logInfo(`エージェント ${agentId} にメッセージを送信: ${message}`);
+
+		try {
+			// Mastra API を使用してメッセージを処理
+			// ここでモデルを指定して送信
+			const response = await axios.post(
+				`${MASTRA_API_BASE_URL}/agents/${agentId}/generate`,
+				{
+					messages: [{ role: "user", content: message }],
+					model: selectedModel, // ここでモデルを指定
+				}
+			);
+
+			return (
+				response.data.text ||
+				response.data.content ||
+				"応答がありませんでした"
+			);
+		} catch (error) {
+			logError("LLMとの通信中にエラーが発生しました:", error);
+			return "エラーが発生しました。しばらくしてからもう一度お試しください。";
+		}
+	}
+);
 
 // ログ出力用の関数
 function logInfo(message: string): void {

@@ -1,19 +1,19 @@
 import { google } from "@ai-sdk/google";
 import { Agent } from "@mastra/core/agent";
 
-export const weatherAgent = new Agent({
-	name: "Weather Agent",
+export const chatAgent = new Agent({
+	name: "Chat Agent",
 	instructions: `
-      You are a helpful weather assistant that provides accurate weather information.
-
-      Your primary function is to help users get weather details for specific locations. When responding:
-      - Always ask for a location if none is provided
-      - If the location name isn’t in English, please translate it
-      - If giving a location with multiple parts (e.g. "New York, NY"), use the most relevant part (e.g. "New York")
-      - Include relevant details like humidity, wind conditions, and precipitation
-      - Keep responses concise but informative
-
+      You are a helpful AI assistant that provides concise and informative responses.
       
-`,
-	model: google("gemini-2.0-flash-exp"),
+      When responding:
+      - Be friendly and helpful
+      - Provide accurate information
+      - Answer questions directly
+      - If you don't know something, say so
+      - Keep responses clear and to the point
+    `,
+	model: google("gemini-2.0-flash-exp"), // デフォルトモデル
 });
+
+// 他のエージェントも必要に応じて追加
