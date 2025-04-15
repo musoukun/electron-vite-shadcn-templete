@@ -26,27 +26,32 @@ function App() {
 
 	// APIキー更新イベントのリスナーを設定
 	useEffect(() => {
-		const unsubscribe = window.electronAPI.onApiKeyUpdate((result) => {
-			if (result.success) {
-				// 成功メッセージを表示
-				const successMessage = {
-					role: "system",
-					content: "APIキーが正常に設定されました。",
-				};
-				setChatHistory((prev) => [...prev, successMessage]);
-			} else {
-				// エラーメッセージを表示
-				const errorMessage = {
-					role: "system",
-					content: `APIキーの設定に失敗しました: ${result.message}`,
-				};
-				setChatHistory((prev) => [...prev, errorMessage]);
-			}
-		});
+		// window.electronAPI が存在するか確認してから処理を実行
+		if (window.electronAPI?.onApiKeyUpdate) {
+			const unsubscribe = window.electronAPI.onApiKeyUpdate((result) => {
+				if (result.success) {
+					// 成功メッセージを表示
+					const successMessage = {
+						role: "system",
+						content: "APIキーが正常に設定されました。",
+					};
+					setChatHistory((prev) => [...prev, successMessage]);
+				} else {
+					// エラーメッセージを表示
+					const errorMessage = {
+						role: "system",
+						content: `APIキーの設定に失敗しました: ${result.message}`,
+					};
+					setChatHistory((prev) => [...prev, errorMessage]);
+				}
+			});
 
-		return () => {
-			if (unsubscribe) unsubscribe();
-		};
+			return () => {
+				if (unsubscribe) unsubscribe();
+			};
+		}
+		// electronAPI が存在しない場合は何もしない
+		return undefined;
 	}, []);
 
 	const handleSendMessage = async () => {
@@ -59,12 +64,24 @@ function App() {
 		setChatHistory((prev) => [...prev, userMessage]);
 
 		try {
-			// LLMにメッセージを送信
-			const response = await window.electronAPI.sendMessageToLLM(message);
+			// window.electronAPI が存在するか確認
+			if (window.electronAPI?.sendMessageToLLM) {
+				// LLMにメッセージを送信
+				const response =
+					await window.electronAPI.sendMessageToLLM(message);
 
-			// AIの応答をチャット履歴に追加
-			const aiMessage = { role: "assistant", content: response };
-			setChatHistory((prev) => [...prev, aiMessage]);
+				// AIの応答をチャット履歴に追加
+				const aiMessage = { role: "assistant", content: response };
+				setChatHistory((prev) => [...prev, aiMessage]);
+			} else {
+				// 開発環境用のダミー応答
+				const dummyResponse = {
+					role: "assistant",
+					content:
+						"開発環境では応答をシミュレートしています。Electron APIが利用できません。",
+				};
+				setChatHistory((prev) => [...prev, dummyResponse]);
+			}
 
 			// 入力フィールドをクリア
 			setMessage("");

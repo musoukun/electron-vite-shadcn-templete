@@ -24,12 +24,21 @@ export function ApiKeyDialog({ open, onOpenChange }: ApiKeyDialogProps) {
 
 		setIsSubmitting(true);
 		try {
-			const result = await window.electronAPI.setApiKey(apiKey);
-			if (result.success) {
-				onOpenChange(false);
+			if (window.electronAPI?.setApiKey) {
+				const result = await window.electronAPI.setApiKey(apiKey);
+				if (result.success) {
+					onOpenChange(false);
+				} else {
+					// エラー処理
+					console.error(
+						"APIキーの設定に失敗しました:",
+						result.message
+					);
+				}
 			} else {
-				// エラー処理
-				console.error("APIキーの設定に失敗しました:", result.message);
+				// 開発環境用の処理
+				console.log("開発環境: APIキー設定をシミュレート");
+				onOpenChange(false);
 			}
 		} catch (error) {
 			console.error("APIキーの設定中にエラーが発生しました:", error);
