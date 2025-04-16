@@ -9,13 +9,22 @@ let mainWindow: BrowserWindow | null = null;
 function createWindow(): void {
 	console.log("Creating main window...");
 
+	// プリロードスクリプトのパスを確認
+	const preloadPath = path.join(__dirname, "../preload/index.js");
+	console.log(`Preload script path: ${preloadPath}`);
+	console.log(`File exists: ${require("fs").existsSync(preloadPath)}`);
+
 	mainWindow = new BrowserWindow({
 		width: 1200,
 		height: 800,
 		webPreferences: {
-			preload: path.join(__dirname, "../preload/index.js"),
+			preload: preloadPath,
 			contextIsolation: true,
 			nodeIntegration: false,
+			// セキュリティ設定を改善
+			sandbox: false, // プリロードスクリプトのために必要
+			webSecurity: true, // 常に有効化
+			allowRunningInsecureContent: false, // 常に無効化
 		},
 		show: false,
 		backgroundColor: "#FFFFFF",
@@ -24,7 +33,31 @@ function createWindow(): void {
 	// 開発環境であればDevToolsを開く
 	if (!app.isPackaged) {
 		mainWindow.webContents.openDevTools();
+		console.log("DevTools opened");
 	}
+
+	// レンダラーに対してプリロードが正しく読み込まれたことをチェックする
+	mainWindow.webContents.on("did-finish-load", () => {
+		console.log("Renderer process loaded");
+		mainWindow?.webContents
+			.executeJavaScript(
+				`
+			console.log("Checking preload APIs...");
+			console.log("electronAPI available:", !!window.electronAPI);
+			console.log("mastraAPI available:", !!window.mastraAPI);
+		`
+			)
+			.catch((err) => {
+				console.error("Error checking preload APIs:", err);
+			});
+	});
+
+	mainWindow.webContents.on(
+		"did-fail-load",
+		(event, errorCode, errorDescription) => {
+			console.error(`Failed to load: ${errorDescription} (${errorCode})`);
+		}
+	);
 
 	mainWindow.on("ready-to-show", () => {
 		mainWindow?.show();
