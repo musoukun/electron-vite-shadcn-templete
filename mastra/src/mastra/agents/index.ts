@@ -1,13 +1,20 @@
 import { Agent } from "@mastra/core/agent";
 import { google } from "@ai-sdk/google";
 import { MCPConfiguration } from "@mastra/mcp";
+import * as fs from "fs";
+import * as path from "path";
+import { fileURLToPath } from "url";
 
 /**
  * エージェント定義モジュール
- * Gemini Flash Experimentalモデルを使用するエージェントを定義
+ * 複数のモデルを使用するエージェントを定義・管理
  */
 
-// 基本指示文
+// ESMモジュールでのファイルパス取得のためのヘルパー
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// 基本指示文 - すべてのエージェントで共通して使用
 const baseInstructions = `
 あなたは高性能な会話エージェントです。
 ユーザーの質問に対して、簡潔かつ正確な回答を提供してください。
@@ -24,25 +31,83 @@ const baseInstructions = `
 - ツールの結果を適切に解釈し、ユーザーにわかりやすく説明してください
 `;
 
+/**
+ * エージェント設定の配列
+ * name: エージェント名
+ * model: 使用するモデル
+ * instructions: エージェントへの指示文
+ */
+export const agentConfigs = [
+	{
+		name: "Gemini Flash Experimental",
+		model: google("gemini-2.0-flash-exp"),
+		instructions: baseInstructions,
+	},
+	// 以下に他のエージェント設定を追加できます
+	// {
+	//   name: "Claude 3 Haiku",
+	//   model: anthropic("claude-3-haiku"),
+	//   instructions: baseInstructions,
+	// },
+];
+
+/**
+ * JSONファイルからMCP設定を読み込む関数
+ * @param configPath JSONファイルの相対パス
+ * @returns MCPサーバー設定オブジェクト
+ */
+function loadMCPConfig(configPath: string): any {
+	try {
+		// ESMモジュール対応でのパス解決
+		// 現在のファイルからの相対パスでファイルを読み込む
+		const absolutePath = path.resolve(__dirname, "../../", configPath);
+		console.log(`MCPサーバー設定を読み込み中: ${absolutePath}`);
+
+		if (!fs.existsSync(absolutePath)) {
+			console.error(`設定ファイルが見つかりません: ${absolutePath}`);
+			return { servers: {} };
+		}
+
+		const configContent = fs.readFileSync(absolutePath, "utf8");
+		const config = JSON.parse(configContent);
+		console.log(
+			`MCPサーバー設定を読み込みました: ${Object.keys(config.servers || {}).length}個のサーバー設定`
+		);
+		return config;
+	} catch (error) {
+		console.error(
+			"MCPサーバー設定の読み込み中にエラーが発生しました:",
+			error
+		);
+		return { servers: {} }; // エラー時は空の設定を返す
+	}
+}
+
+// JSONファイルからMCP設定を読み込む
+const mcpConfig = loadMCPConfig("mcp-servers.json");
+
 // MCP設定を作成
 const mcp = new MCPConfiguration({
-	id: "gemini-flash-mcp",
-	servers: {
-		"brave-search": {
-			command: "npx",
-			args: ["-y", "@modelcontextprotocol/server-brave-search"],
-			env: {
-				BRAVE_API_KEY: "BSA_shGcgIJnHv9pNaFaQ6GHXGbaJMW",
-			},
-		},
-	},
+	id: "mastra-mcp",
+	servers: mcpConfig.servers || {},
 });
 
-// MCP通信を事前に初期化する非同期関数
-// このようにすることで、エージェント生成前にMCPとの接続を確立できる
+/**
+ * MCP通信を初期化する非同期関数
+ * エージェント生成前にMCPとの接続を確立
+ * @returns 初期化されたMCPツールオブジェクト
+ */
 async function initMCP() {
 	try {
 		console.log("MCPツールを初期化しています...");
+
+		// 設定されたサーバーがない場合は警告を表示
+		if (Object.keys(mcpConfig.servers || {}).length === 0) {
+			console.warn(
+				"警告: MCPサーバーが設定されていません。一部の機能が利用できない可能性があります。"
+			);
+		}
+
 		const tools = await mcp.getTools();
 		console.log(
 			`${Object.keys(tools).length}個のMCPツールを初期化しました`
@@ -54,27 +119,127 @@ async function initMCP() {
 	}
 }
 
-// エージェントを初期化し、エクスポート（即時実行関数で非同期処理を実行）
-export const geminiFlashAgent = new Agent({
-	name: "Gemini Flash Experimental",
-	model: google("gemini-2.0-flash-exp"),
-	instructions: baseInstructions,
-	// MCPツールを空のオブジェクトで初期化し、後から非同期で取得したツールを設定
-	tools: {},
-});
+/**
+ * 設定から複数のエージェントを生成して管理するクラス
+ */
+class AgentManager {
+	// 初期化したエージェントを保持する配列
+	agents: Agent[] = [];
+
+	/**
+	 * 設定配列からエージェントを初期化
+	 * @param configs エージェント設定の配列
+	 */
+	constructor(configs = agentConfigs) {
+		// 各設定からエージェントを生成
+		this.agents = configs.map(
+			(config) =>
+				new Agent({
+					name: config.name,
+					model: config.model,
+					instructions: config.instructions,
+					tools: {}, // 初期状態では空のツール設定
+				})
+		);
+
+		console.log(`${this.agents.length}個のエージェントを初期化しました`);
+	}
+
+	/**
+	 * すべてのエージェントにMCPツールを設定
+	 * @param tools 設定するMCPツール
+	 */
+	setToolsToAll(tools: Record<string, any>) {
+		for (const agent of this.agents) {
+			// @ts-ignore - tools プロパティは通常読み取り専用だが、初期化時に設定可能
+			agent.tools = tools;
+		}
+		console.log(
+			`${this.agents.length}個のエージェントにツールを設定しました`
+		);
+	}
+
+	/**
+	 * 名前からエージェントを取得
+	 * @param name エージェント名
+	 * @returns 見つかったエージェント、または最初のエージェント
+	 */
+	getAgent(name?: string): Agent {
+		if (name) {
+			const found = this.agents.find((agent) => agent.name === name);
+			if (found) return found;
+		}
+		// 指定したエージェントが見つからない場合は最初のエージェントを返す
+		return this.agents[0];
+	}
+
+	/**
+	 * 名前によるエージェント検索結果を返す
+	 * @param name エージェント名
+	 * @returns 見つかったエージェントまたはundefined
+	 */
+	findAgent(name: string): Agent | undefined {
+		return this.agents.find((agent) => agent.name === name);
+	}
+
+	/**
+	 * 利用可能なすべてのエージェント名を取得
+	 * @returns エージェント名の配列
+	 */
+	getAgentNames(): string[] {
+		return this.agents.map((agent) => agent.name);
+	}
+}
+
+// エージェントマネージャーのインスタンスを作成
+const agentManager = new AgentManager();
 
 // エージェント初期化後にMCPツールを設定
-// すぐに実行されるが、エージェントの初期化は非同期に行われる
 (async () => {
 	try {
 		const mcpTools = await initMCP();
 
-		// すでに作成したエージェントにツールを設定
-		// @ts-ignore - tools プロパティは通常読み取り専用だが、初期化時に設定可能
-		geminiFlashAgent.tools = mcpTools;
+		// すべてのエージェントにツールを設定
+		agentManager.setToolsToAll(mcpTools);
 
-		console.log("Gemini Flash エージェントを正常に初期化しました");
+		console.log("すべてのエージェントを正常に初期化しました");
 	} catch (error) {
 		console.error("エージェント初期化中にエラーが発生しました:", error);
 	}
 })();
+
+// エクスポート用のエージェントリファレンスを作成
+// 後方互換性のために最初のエージェントをデフォルトとしてエクスポート
+export const geminiFlashAgent = agentManager.getAgent(
+	"Gemini Flash Experimental"
+);
+
+// すべてのエージェントとマネージャーをエクスポート
+export const agents = agentManager.agents;
+export { agentManager };
+
+// ユーティリティ関数をエクスポート
+/**
+ * 利用可能なすべてのエージェント名を取得
+ * @returns エージェント名の配列
+ */
+export function getAvailableAgents(): string[] {
+	return agentManager.getAgentNames();
+}
+
+/**
+ * 名前からエージェントを取得
+ * @param name エージェント名
+ * @returns 見つかったエージェント、または最初のエージェント
+ */
+export function getAgentByName(name?: string): Agent {
+	return agentManager.getAgent(name);
+}
+
+/**
+ * MCPサーバー設定情報を取得
+ * @returns MCPサーバー設定情報
+ */
+export function getMCPConfig(): any {
+	return mcpConfig;
+}
