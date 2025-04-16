@@ -92,7 +92,7 @@ try {
 			}
 		},
 
-		// Agentにメッセージを送信して返答をストリーミングで取得
+		// Agentにメッセージを送信して返答をストリーミングで取得 (IPC版)
 		streamMessageFromAgent: async (
 			agentId: string,
 			messages: any[],
@@ -100,140 +100,63 @@ try {
 			onChunk?: (chunk: string) => void
 		) => {
 			try {
-				console.log(`Streaming request to agent ${agentId}`);
+				console.log(`Streaming request to agent ${agentId} via IPC`);
 				console.log("Original messages:", JSON.stringify(messages));
 
-				// ユーザーメッセージのみを抽出（APIの要件に合わせる）
-				const userMessages = messages
-					.filter((msg) => msg.role === "user")
-					.map((msg) => ({
-						role: "user",
-						content: msg.content,
-					}));
-
-				// APIが期待する形式でリクエストを構築
-				const requestBody = {
-					messages: userMessages,
-					runId: agentId, // エージェントIDをrunIdとして使用
-					maxRetries: 2,
-					maxSteps: 5,
-					temperature: 0.5,
-					topP: 1,
-				};
-
-				console.log("Request payload:", JSON.stringify(requestBody));
-
-				const response = await fetch(
-					`${API_BASE_URL}/api/agents/${agentId}/stream`,
-					{
-						method: "POST",
-						headers: {
-							"Content-Type": "application/json",
-							Accept: "application/json",
-						},
-						body: JSON.stringify(requestBody),
-						mode: "cors",
-						credentials: "omit",
-					}
-				);
-
-				console.log("Stream response:", response);
-
-				if (!response.ok) {
-					throw new Error(`APIエラー: ${response.status}`);
-				}
-
-				console.log("Stream response started");
-
-				// ストリームレスポンスの読み取り
-				const reader = response.body?.getReader();
-				const decoder = new TextDecoder();
-				let buffer = "";
-
-				if (reader) {
-					while (true) {
-						const { value, done } = await reader.read();
-
-						if (done) {
-							console.log("Stream response completed");
-							break;
-						}
-
-						// バイナリデータをテキストに変換
-						const text = decoder.decode(value, { stream: true });
-						console.log("Received chunk:", text); // デバッグ用
-						buffer += text;
-
-						// SSEフォーマットの処理
-						const lines = buffer.split("\n");
-						buffer = lines.pop() || "";
-
-						for (const line of lines) {
-							console.log("Processing line:", line); // デバッグ用
-
-							if (line.trim()) {
+				// ストリームチャンクを受け取るリスナー
+				const chunkListener = (_, text: string) => {
+					// チャンクデータを処理
+					if (text && text.trim()) {
+						try {
+							// テキスト行の解析
+							console.log("Processing line:", text);
+							
+							// 0:"テキスト" 形式
+							if (text.startsWith('0:"')) {
+								// 0:"から始まるテキストを抽出して解析
+								const content = text.substring(3, text.length - 1);
+								// バックスラッシュをエスケープ解除
+								const unescapedContent = content.replace(/\\"/g, '"');
+								if (onChunk) {
+									onChunk(unescapedContent);
+								}
+								return;
+							}
+							
+							// data: 形式のチェック（従来のSSE形式）
+							if (text.startsWith("data:")) {
 								try {
-									// 0:"テキスト" 形式のチェック（テキストデータ）
-									if (line.startsWith('0:"')) {
-										// 0:"から始まるテキストを抽出
-										const content = line.substring(
-											3,
-											line.length - 1
-										);
-										// バックスラッシュをエスケープ解除
-										const unescapedContent =
-											content.replace(/\\"/g, '"');
-										if (onChunk) {
-											onChunk(unescapedContent);
-										}
-										continue;
-									}
-
-									// data: 形式のチェック（従来のSSE形式）
-									if (line.startsWith("data:")) {
-										const dataContent = line
-											.substring(5)
-											.trim();
+									const dataContent = text.substring(5).trim();
+									if (dataContent) {
 										const data = JSON.parse(dataContent);
-
-										// 従来の処理
-										if (
-											data.text ||
-											data.content ||
-											data.delta
-										) {
-											const content =
-												data.text ||
-												data.content ||
-												data.delta ||
-												"";
-											if (content && onChunk) {
-												onChunk(content);
-											}
+										// テキスト内容を取り出す
+										const content = data.text || data.content || data.delta || "";
+										if (content && onChunk) {
+											onChunk(content);
 										}
-										continue;
 									}
-
-									// その他のJSONデータの処理（f:, 9:, a:など）
-									const colonIndex = line.indexOf(":");
-									if (colonIndex > 0) {
+								} catch (e) {
+									console.error("SSEデータの解析エラー:", e);
+								}
+								return;
+							}
+							
+							// その他のJSONデータの処理（f:, 9:, a:など）
+							const colonIndex = text.indexOf(":");
+							if (colonIndex > 0) {
+								try {
+									const prefix = text.substring(0, colonIndex);
+									const dataContent = text.substring(colonIndex + 1);
+									
+									// 有効なJSONかチェック
+									if (dataContent.trim().startsWith('{') || dataContent.trim().startsWith('[')) {
 										try {
-											const dataContent = line.substring(
-												colonIndex + 1
-											);
-											const data =
-												JSON.parse(dataContent);
-
+											const data = JSON.parse(dataContent);
+											
 											// テキストコンテンツを探す
-											if (
-												data.content &&
-												Array.isArray(data.content)
-											) {
+											if (data.content && Array.isArray(data.content)) {
 												for (const item of data.content) {
-													if (
-														item.type === "text" &&
-														item.text
-													) {
+													if (item.type === "text" && item.text) {
 														if (onChunk) {
 															onChunk(item.text);
 														}
@@ -241,64 +164,87 @@ try {
 												}
 											}
 										} catch (parseError) {
-											console.error(
-												"Parsing error for line with colon:",
-												parseError
-											);
+											// JSON解析に失敗しても継続
+											console.warn("JSON解析エラー:", parseError);
 										}
 									}
-								} catch (e) {
-									console.error(
-										"JSON解析エラー:",
-										e,
-										"Line:",
-										line
-									);
+								} catch (error) {
+									console.warn("行の処理に失敗:", error);
 								}
 							}
+						} catch (e) {
+							console.error("チャンク処理エラー:", e);
 						}
 					}
+				};
+
+				// エラーリスナー
+				const errorListener = (_, errorMessage: string) => {
+					console.error("ストリームエラー:", errorMessage);
+				};
+
+				// 完了リスナー
+				const endListener = () => {
+					console.log("ストリーム完了");
+					// リスナーのクリーンアップ
+					cleanup();
+				};
+
+				// リスナーのクリーンアップ関数
+				const cleanup = () => {
+					ipcRenderer.removeListener('stream-chunk', chunkListener);
+					ipcRenderer.removeListener('stream-error', errorListener);
+					ipcRenderer.removeListener('stream-end', endListener);
+				};
+
+				// リスナーを登録
+				ipcRenderer.on('stream-chunk', chunkListener);
+				ipcRenderer.on('stream-error', errorListener);
+				ipcRenderer.on('stream-end', endListener);
+
+				// IPCを通じてメインプロセスにストリーミング開始を依頼
+				const result = await ipcRenderer.invoke('start-stream', {
+					agentId,
+					messages,
+					threadId
+				});
+
+				// エラーチェック
+				if (!result.success) {
+					cleanup(); // リスナーをクリーンアップ
+					throw new Error(result.error || "ストリーミングの開始に失敗しました");
 				}
 
+				// 成功を返す（実際のレスポンスはイベントリスナー経由で取得）
 				return { success: true };
 			} catch (error) {
-				console.error(
-					"メッセージのストリーミングに失敗しました:",
-					error
-				);
+				console.error("メッセージのストリーミングに失敗しました:", error);
 				throw error;
 			}
 		},
 
-		// 従来の一括レスポンス方式のメッセージ送信（フォールバック用）
+		// 従来の一括レスポンス方式のメッセージ送信（フォールバック用）- IPC版
 		sendMessageToAgent: async (
 			agentId: string,
 			messages: any[],
 			threadId?: string
 		) => {
 			try {
-				const response = await fetch(
-					`${API_BASE_URL}/api/agents/${agentId}/generate`,
-					{
-						method: "POST",
-						headers: {
-							"Content-Type": "application/json",
-							Accept: "application/json",
-						},
-						body: JSON.stringify({
-							messages,
-							threadId: threadId || undefined,
-						}),
-						mode: "cors",
-						credentials: "omit",
-					}
-				);
-
-				if (!response.ok) {
-					throw new Error(`APIエラー: ${response.status}`);
+				console.log(`Sending message to agent ${agentId} via IPC`);
+				
+				// IPCを通じてメインプロセスにメッセージ送信を依頼
+				const result = await ipcRenderer.invoke('send-message', {
+					agentId,
+					messages,
+					threadId
+				});
+				
+				// エラーチェック
+				if (!result.success) {
+					throw new Error(result.error || "メッセージの送信に失敗しました");
 				}
-
-				return await response.json();
+				
+				return { response: result.response || "" };
 			} catch (error) {
 				console.error("メッセージの送信に失敗しました:", error);
 				throw error;

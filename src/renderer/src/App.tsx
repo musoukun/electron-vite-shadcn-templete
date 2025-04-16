@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -31,6 +31,14 @@ interface Agent {
 interface Thread {
 	id: string;
 	title: string;
+}
+
+// メッセージの型定義
+interface ChatMessage {
+	role: string;
+	content: string;
+	id?: string;
+	createdAt?: string;
 }
 
 // Agent選択ダイアログコンポーネント
@@ -108,11 +116,9 @@ function AgentSelectionDialog({
 function App() {
 	// 状態管理
 	const [message, setMessage] = useState("");
-	const [chatHistory, setChatHistory] = useState<
-		{ role: string; content: string }[]
-	>([]);
+	const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
-	const [currentResponse, setCurrentResponse] = useState(""); // ストリーミング中のレスポンス
+	const [streamError, setStreamError] = useState<string | null>(null);
 	const [agents, setAgents] = useState<Agent[]>([]);
 	const [isAgentsLoading, setIsAgentsLoading] = useState(false);
 	const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
@@ -120,12 +126,17 @@ function App() {
 	const [threads, setThreads] = useState<Thread[]>([]);
 	const [isThreadsLoading, setIsThreadsLoading] = useState(false);
 	const [isAgentSelectionOpen, setIsAgentSelectionOpen] = useState(false);
+	const messagesEndRef = useRef<HTMLDivElement>(null);
+
+	// メッセージが追加されたら自動スクロール
+	useEffect(() => {
+		if (messagesEndRef.current) {
+			messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+		}
+	}, [chatHistory]);
 
 	// チャンクを処理する関数
 	const handleChunk = (chunk: string) => {
-		// 現在のレスポンスに追加
-		setCurrentResponse((prev) => prev + chunk);
-
 		// チャット履歴の最後のメッセージを更新
 		setChatHistory((prev) => {
 			const newHistory = [...prev];
@@ -190,45 +201,12 @@ function App() {
 		}
 	};
 
-	// スレッド一覧を読み込む
-	const loadThreads = async (agentId: string) => {
-		if (!agentId) return;
-
-		setIsThreadsLoading(true);
-		try {
-			const threadList = await window.mastraAPI.getThreads(agentId);
-			setThreads(Array.isArray(threadList) ? threadList : []);
-		} catch (error) {
-			console.error("スレッド一覧の読み込みに失敗しました:", error);
-			setThreads([]);
-		} finally {
-			setIsThreadsLoading(false);
-		}
-	};
-
-	// スレッドのメッセージを読み込む
-	const loadThreadMessages = async (threadId: string, agentId: string) => {
-		if (!threadId || !agentId) return;
-
-		setIsLoading(true);
-		try {
-			const messages = await window.mastraAPI.getThreadMessages(
-				threadId,
-				agentId
-			);
-			setChatHistory(messages);
-		} catch (error) {
-			console.error("スレッドメッセージの読み込みに失敗しました:", error);
-		} finally {
-			setIsLoading(false);
-		}
-	};
-
 	// 新しい会話を開始
 	const startNewChat = () => {
 		// 現在の会話をクリア
 		setChatHistory([]);
 		setCurrentThreadId(null);
+		setStreamError(null);
 
 		// mastraAPIの存在チェック
 		if (typeof window === "undefined" || !window.mastraAPI) {
@@ -256,6 +234,7 @@ function App() {
 	const handleAgentSelect = async (agent: Agent) => {
 		setSelectedAgent(agent);
 		setIsAgentSelectionOpen(false);
+		setStreamError(null);
 
 		// スレッド作成処理をスキップ - メモリ機能が未実装のため
 		console.log(`Selected agent: ${agent.id} - ${agent.name}`);
@@ -274,45 +253,55 @@ function App() {
 
 	// メッセージ送信処理
 	const sendMessage = async () => {
-		if (!message.trim()) return;
+		if (!message.trim() || !selectedAgent) return;
+
+		// エラー状態をリセット
+		setStreamError(null);
 
 		// ユーザーメッセージをチャット履歴に追加
-		const userMessage = { role: "user", content: message };
+		const userMessage: ChatMessage = {
+			role: "user",
+			content: message.trim(),
+		};
 		setChatHistory((prev) => [...prev, userMessage]);
 
 		// 入力欄をクリア
 		setMessage("");
 
 		// AIの応答用のプレースホルダーをチャット履歴に追加
-		const aiResponsePlaceholder = { role: "assistant", content: "" };
+		const aiResponsePlaceholder: ChatMessage = {
+			role: "assistant",
+			content: "",
+		};
 		setChatHistory((prev) => [...prev, aiResponsePlaceholder]);
 
-		// 現在のレスポンスをリセット
-		setCurrentResponse("");
+		setIsLoading(true);
 
-		try {
-			// 送信するメッセージを準備
-			const messages = [...chatHistory, userMessage].map((msg) => ({
+		// 送信するメッセージを準備（システムメッセージは除外）
+		const messagesToSend = chatHistory
+			.filter((msg) => msg.role !== "system")
+			.concat(userMessage)
+			.map((msg) => ({
 				role: msg.role,
 				content: msg.content,
 			}));
 
-			setIsLoading(true);
+		console.log("Sending messages:", messagesToSend);
 
-			// エージェントIDの確認
-			if (!selectedAgent) {
-				throw new Error("エージェントが選択されていません");
-			}
-
-			// Mastra APIにリクエストを送信（ストリーミングモード）
+		try {
+			// マストラAPIを使用してメッセージを送信（IPC版のストリーミングメソッド）
 			await window.mastraAPI.streamMessageFromAgent(
 				selectedAgent.id,
-				messages,
+				messagesToSend,
 				currentThreadId || undefined,
 				handleChunk
 			);
 		} catch (error: any) {
 			console.error("Error in sendMessage:", error);
+
+			// エラーメッセージを保存
+			setStreamError(error.message || "不明なエラーが発生しました");
+
 			// エラーメッセージをチャット履歴に追加
 			setChatHistory((prev) => {
 				const newHistory = [...prev];
@@ -321,14 +310,67 @@ function App() {
 					if (lastMessage.role === "assistant") {
 						newHistory[newHistory.length - 1] = {
 							...lastMessage,
-							content:
-								"エラーが発生しました: " +
-								(error.message || "不明なエラー"),
+							content: `エラーが発生しました: ${error.message || "不明なエラー"}\n\n再度メッセージを送信してください。`,
 						};
 					}
 				}
 				return newHistory;
 			});
+
+			// フォールバック処理を試す
+			try {
+				console.log("Trying fallback non-streaming API call...");
+				// 非ストリーミングAPIを使用してメッセージを送信
+				if (window.mastraAPI.sendMessageToAgent) {
+					const response = await window.mastraAPI.sendMessageToAgent(
+						selectedAgent.id,
+						messagesToSend,
+						currentThreadId || undefined
+					);
+
+					// 安全にレスポンステキストを抽出
+					let responseContent = "";
+					if (response) {
+						if (typeof response === "string") {
+							responseContent = response;
+						} else if (response.response) {
+							responseContent =
+								typeof response.response === "string"
+									? response.response
+									: JSON.stringify(response.response);
+						} else if (response.content) {
+							responseContent =
+								typeof response.content === "string"
+									? response.content
+									: JSON.stringify(response.content);
+						}
+					}
+
+					if (responseContent) {
+						// レスポンスが取得できた場合は表示する
+						setChatHistory((prev) => {
+							const newHistory = [...prev];
+							if (newHistory.length > 0) {
+								const lastMessage =
+									newHistory[newHistory.length - 1];
+								if (lastMessage.role === "assistant") {
+									newHistory[newHistory.length - 1] = {
+										...lastMessage,
+										content: responseContent,
+									};
+								}
+							}
+							return newHistory;
+						});
+
+						console.log("Fallback API call succeeded");
+						setStreamError(null);
+					}
+				}
+			} catch (fallbackError) {
+				console.error("Fallback API call also failed:", fallbackError);
+				// フォールバックも失敗した場合は既に表示されているエラーメッセージを維持
+			}
 		} finally {
 			setIsLoading(false);
 		}
@@ -371,17 +413,6 @@ function App() {
 		// loadAgents();
 	}, []);
 
-	// 選択されたAgentが変更されたらスレッド一覧を読み込む
-	useEffect(() => {
-		if (selectedAgent) {
-			// メモリ機能が未実装のため、スレッド一覧の取得はスキップ
-			console.log(
-				`Agent selected: ${selectedAgent.id}, skipping thread loading`
-			);
-			// loadThreads(selectedAgent.id); <- コメントアウトまたは削除
-		}
-	}, [selectedAgent]);
-
 	return (
 		<SidebarProvider>
 			<div className="flex h-screen w-full">
@@ -401,39 +432,6 @@ function App() {
 							<Plus className="mr-2 h-4 w-4" />
 							<span>新しい会話</span>
 						</Button>
-
-						{/* 会話履歴のリスト - メモリ機能が実装されていないので非表示 */}
-						{/* <div className="space-y-1">
-							{isThreadsLoading ? (
-								<div className="text-center py-2 text-sm text-muted-foreground">
-									読み込み中...
-								</div>
-							) : threads.length === 0 ? (
-								<div className="text-center py-2 text-sm text-muted-foreground">
-									会話履歴がありません
-								</div>
-							) : (
-								threads.map((thread) => (
-									<Button
-										key={thread.id}
-										variant="ghost"
-										className={`w-full justify-start text-sm ${
-											currentThreadId === thread.id
-												? "bg-muted"
-												: ""
-										}`}
-										onClick={() =>
-											handleThreadSelect(thread)
-										}
-									>
-										<MessageSquare className="mr-2 h-4 w-4" />
-										<span className="truncate">
-											{thread.title}
-										</span>
-									</Button>
-								))
-							)}
-						</div> */}
 					</SidebarContent>
 
 					{/* アカウント情報 */}
@@ -509,7 +507,7 @@ function App() {
 														: "システム"}
 											</CardTitle>
 										</CardHeader>
-										<CardContent className="py-2">
+										<CardContent className="py-2 whitespace-pre-wrap">
 											{chat.content}
 											{isLoading &&
 												index ===
@@ -523,8 +521,17 @@ function App() {
 									</Card>
 								))
 							)}
+							{/* 自動スクロール用の参照 */}
+							<div ref={messagesEndRef}></div>
 						</div>
 					</div>
+
+					{/* エラーメッセージの表示 */}
+					{streamError && (
+						<div className="p-2 bg-red-50 border-t border-red-200 text-red-700 text-sm">
+							<p>エラーが発生しました: {streamError}</p>
+						</div>
+					)}
 
 					<div className="p-4 border-t">
 						<div className="flex gap-2 max-w-4xl mx-auto">
@@ -545,7 +552,11 @@ function App() {
 							/>
 							<Button
 								onClick={sendMessage}
-								disabled={isLoading || !selectedAgent}
+								disabled={
+									isLoading ||
+									!selectedAgent ||
+									!message.trim()
+								}
 							>
 								{isLoading ? (
 									"送信中..."

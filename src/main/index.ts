@@ -1,5 +1,15 @@
 import { app, BrowserWindow, ipcMain, dialog } from "electron";
 import path from "path";
+import axios from "axios";
+// @ts-ignore - client-jsの型定義がない場合、エラーを無視
+import { MastraClient } from "@mastra/client-js";
+// APIのベースURL
+const API_BASE_URL = "http://localhost:4111";
+
+// MastraClientの初期化
+const mastraClient = new MastraClient({
+	baseUrl: API_BASE_URL,
+});
 
 // アプリのウィンドウを格納するグローバル参照
 // これをしないとGCされてしまいます
@@ -111,3 +121,114 @@ ipcMain.handle("dialog:openFile", async () => {
 		return filePaths[0];
 	}
 });
+
+// ストリーミング用のIPC通信ハンドラ - Mastra SDK版
+ipcMain.handle(
+	"start-stream",
+	async (event, { agentId, messages, threadId }) => {
+		console.log(`Start streaming for agent ${agentId}`);
+		console.log("Messages:", JSON.stringify(messages));
+
+		try {
+			// ユーザーメッセージのみを抽出（現在のユースケースに合わせる）
+			const userMessages = messages
+				.filter((msg: any) => msg.role === "user")
+				.map((msg: any) => ({
+					role: "user",
+					content: msg.content,
+				}));
+
+			// 現在のウィンドウを取得
+			const currentWindow = BrowserWindow.fromWebContents(event.sender);
+
+			// MastraClientを使用してエージェントを取得
+			const agent = mastraClient.getAgent(agentId);
+
+			// ストリーミングレスポンスを取得
+			const response = await agent.stream({
+				messages: userMessages,
+				threadId: threadId || undefined,
+			});
+
+			// ストリーミングレスポンスを処理
+			await response.processDataStream({
+				onTextPart: (text) => {
+					// テキストチャンクをレンダラーに送信
+					if (currentWindow && !currentWindow.isDestroyed()) {
+						currentWindow.webContents.send(
+							"stream-chunk",
+							`0:"${text}"`
+						);
+					}
+				},
+				onErrorPart: (error) => {
+					console.error("Stream error:", error);
+					if (currentWindow && !currentWindow.isDestroyed()) {
+						currentWindow.webContents.send(
+							"stream-error",
+							String(error)
+						);
+					}
+				},
+			});
+
+			// 完了イベントを送信
+			if (currentWindow && !currentWindow.isDestroyed()) {
+				currentWindow.webContents.send("stream-end");
+			}
+
+			return {
+				success: true,
+				message: "ストリーミングが完了しました",
+			};
+		} catch (error: any) {
+			console.error("Error in start-stream:", error);
+			// エラー情報をレンダラーに返す
+			return {
+				success: false,
+				error: error.message,
+				details: error.response?.data || null,
+			};
+		}
+	}
+);
+
+// フォールバック用の通常リクエストハンドラ - Mastra SDK版
+ipcMain.handle(
+	"send-message",
+	async (event, { agentId, messages, threadId }) => {
+		console.log(`Sending message to agent ${agentId}`);
+
+		try {
+			// メッセージを準備（システムメッセージは除外）
+			const messagesToSend = messages
+				.filter((msg: any) => msg.role !== "system")
+				.map((msg: any) => ({
+					role: msg.role,
+					content: msg.content,
+				}));
+
+			console.log("Sending messages:", messagesToSend);
+
+			// MastraClientを使用してエージェントを取得
+			const agent = mastraClient.getAgent(agentId);
+
+			// 非ストリーミングレスポンスを取得
+			const response = await agent.generate({
+				messages: messagesToSend,
+				threadId: threadId || undefined,
+			});
+
+			return {
+				success: true,
+				response: response,
+			};
+		} catch (error: any) {
+			console.error("Error in send-message:", error);
+			return {
+				success: false,
+				error: error.message,
+			};
+		}
+	}
+);
