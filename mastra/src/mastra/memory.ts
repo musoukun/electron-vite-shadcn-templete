@@ -39,14 +39,13 @@ export const memory = new Memory({
 		workingMemory: {
 			enabled: true,
 			template: `
-# ユーザー情報
-- **名前**:
-- **好み**:
-- **関心事**:
-`,
-			use: "text-stream", // テキストストリームモードで更新
+	# ユーザー情報
+	- **名前**:
+	- **好み**:
+	- **関心事**:
+	`,
+			use: "tool-call",
 		},
-
 		// スレッドタイトルの自動生成
 		threads: {
 			generateTitle: true,

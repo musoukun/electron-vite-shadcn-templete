@@ -2,7 +2,21 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Agent, Thread, ChatMessage } from "@/types/chat";
 import { generateUserId, formatMessage } from "@/utils/chat-utils";
 
+// ヘルパー関数: useChatLogic の前に配置
+function isHtmlContent(content: string): boolean {
+	if (!content) return false;
+	const trimmedContent = content.trim();
+	// 簡単なチェック: HTMLタグで始まるか、<html>, <body>タグを含むか
+	return (
+		(trimmedContent.startsWith("<") && trimmedContent.endsWith(">")) ||
+		trimmedContent.includes("<html") ||
+		trimmedContent.includes("<body")
+	);
+}
+
 export function useChatLogic() {
+	// フック内の isHtmlContent 定義は削除
+
 	// 状態管理
 	const [message, setMessage] = useState("");
 	const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -16,9 +30,54 @@ export function useChatLogic() {
 	const [isThreadsLoading, setIsThreadsLoading] = useState(false);
 	const [isAgentSelectionOpen, setIsAgentSelectionOpen] = useState(false);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
+	const [isArtifactOpen, setIsArtifactOpen] = useState(false);
+	const [artifactContent, setArtifactContent] = useState<string | null>(null);
 
 	// ユーザーID
 	const userId = generateUserId();
+
+	// スレッド一覧を読み込む
+	const loadThreads = useCallback(
+		async (agentId: string) => {
+			if (!agentId) return;
+
+			setIsThreadsLoading(true);
+			try {
+				// APIが利用可能かチェック
+				if (!window.mastraAPI || !window.mastraAPI.getThreads) {
+					console.error(
+						"Error: window.mastraAPI.getThreads is undefined"
+					);
+					setThreads([]);
+					return;
+				}
+
+				// ユーザーIDをリソースIDとして使用
+				console.log(
+					`Loading threads for agent: ${agentId}, resourceId: ${userId}`
+				);
+				const threadList = await window.mastraAPI.getThreads(
+					agentId,
+					userId
+				);
+				console.log("Thread list received:", threadList);
+
+				if (!threadList || !Array.isArray(threadList)) {
+					console.warn("API returned invalid thread list");
+					setThreads([]);
+					return;
+				}
+
+				setThreads(threadList);
+			} catch (error) {
+				console.error("Threadsの読み込みに失敗しました:", error);
+				setThreads([]);
+			} finally {
+				setIsThreadsLoading(false);
+			}
+		},
+		[userId]
+	);
 
 	// チャンクを処理する関数
 	const handleChunk = useCallback((chunk: string) => {
@@ -40,40 +99,90 @@ export function useChatLogic() {
 
 	// AIのレスポンスが完了した時のイベントハンドラ
 	const handleStreamComplete = useCallback(async () => {
-		// 現在のスレッドIDがある場合のみ処理（エージェントは自動選択されているはず）
+		// 現在のスレッドIDと選択中のエージェントがある場合のみ処理
 		if (currentThreadId && selectedAgent) {
-			try {
-				// チャット履歴からAIの最初の応答を取得
-				const aiResponses = chatHistory.filter(
-					(msg) => msg.role === "assistant"
+			// 現在のスレッド情報を取得
+			const currentThread = threads.find((t) => t.id === currentThreadId);
+
+			// スレッド情報が存在し、かつタイトルが初期状態の場合のみ更新を試みる
+			const initialTitlePattern = `${selectedAgent.name}との会話`; // 初期タイトルのパターン
+			const isInitialTitle =
+				currentThread && currentThread.title === initialTitlePattern;
+			const isDefaultNewTitle =
+				currentThread && currentThread.title === "新しい会話"; // デフォルトの新規タイトルもチェック
+
+			if (currentThread && (isInitialTitle || isDefaultNewTitle)) {
+				console.log(
+					`スレッド ${currentThreadId} のタイトルが初期状態のため、更新を試みます。`
 				);
-				if (aiResponses.length > 0) {
-					// AIの最初の応答から先頭10文字を取得
-					const aiResponse = aiResponses[0].content;
-					const titleFromResponse =
-						aiResponse.length > 10
-							? `${aiResponse.substring(0, 10)}...`
-							: aiResponse;
-
-					// スレッドタイトルを更新
-					console.log(
-						`スレッドタイトルを更新します: ${titleFromResponse}`
-					);
-					await window.mastraAPI.updateThreadTitle(
-						currentThreadId,
-						selectedAgent.id,
-						titleFromResponse,
-						userId
+				try {
+					// チャット履歴からAIの最初の応答を取得 (システムメッセージは除く)
+					const aiResponses = chatHistory.filter(
+						(msg) => msg.role === "assistant"
 					);
 
-					// スレッド一覧を更新（タイトル変更を反映するため）
-					await loadThreads(selectedAgent.id);
+					if (aiResponses.length > 0) {
+						// AIの最初の応答から先頭10文字を取得
+						const firstAiResponseContent =
+							aiResponses[0].content.trim(); // 前後の空白を除去
+						const titleFromResponse =
+							firstAiResponseContent.length > 10
+								? `${firstAiResponseContent.substring(0, 10)}...`
+								: firstAiResponseContent || "(空の応答)"; // 空の場合のフォールバック
+
+						// スレッドタイトルを更新
+						console.log(
+							`スレッド ${currentThreadId} のタイトルを更新します: ${titleFromResponse}`
+						);
+						await window.mastraAPI.updateThreadTitle(
+							currentThreadId,
+							selectedAgent.id,
+							titleFromResponse,
+							userId
+						);
+
+						// スレッド一覧を更新（タイトル変更を反映するため）
+						await loadThreads(selectedAgent.id);
+					} else {
+						console.log(
+							"AIの応答が見つからないため、タイトルは更新しません。"
+						);
+					}
+				} catch (error) {
+					console.error("スレッドタイトル更新に失敗しました:", error);
 				}
-			} catch (error) {
-				console.error("スレッドタイトル更新に失敗しました:", error);
+			} else {
+				console.log(
+					`スレッド ${currentThreadId} のタイトルは既に設定済みか、スレッドが見つかりません。タイトル更新はスキップします。`
+				);
 			}
 		}
-	}, [currentThreadId, selectedAgent, chatHistory, userId]);
+
+		// Artifactビューのロジック
+		const lastMessage = chatHistory[chatHistory.length - 1];
+		if (
+			lastMessage &&
+			lastMessage.role === "assistant" &&
+			lastMessage.content
+		) {
+			if (isHtmlContent(lastMessage.content)) {
+				console.log(
+					"HTMLコンテンツを検出しました。Artifactビューを開きます。"
+				);
+				setArtifactContent(lastMessage.content);
+				setIsArtifactOpen(true);
+			}
+		}
+	}, [
+		currentThreadId,
+		selectedAgent,
+		chatHistory,
+		threads,
+		userId,
+		loadThreads,
+		setArtifactContent,
+		setIsArtifactOpen,
+	]);
 
 	// 利用可能なエージェントを読み込む
 	const loadAgents = useCallback(async () => {
@@ -122,49 +231,6 @@ export function useChatLogic() {
 			setIsAgentsLoading(false);
 		}
 	}, []);
-
-	// スレッド一覧を読み込む
-	const loadThreads = useCallback(
-		async (agentId: string) => {
-			if (!agentId) return;
-
-			setIsThreadsLoading(true);
-			try {
-				// APIが利用可能かチェック
-				if (!window.mastraAPI || !window.mastraAPI.getThreads) {
-					console.error(
-						"Error: window.mastraAPI.getThreads is undefined"
-					);
-					setThreads([]);
-					return;
-				}
-
-				// ユーザーIDをリソースIDとして使用
-				console.log(
-					`Loading threads for agent: ${agentId}, resourceId: ${userId}`
-				);
-				const threadList = await window.mastraAPI.getThreads(
-					agentId,
-					userId
-				);
-				console.log("Thread list received:", threadList);
-
-				if (!threadList || !Array.isArray(threadList)) {
-					console.warn("API returned invalid thread list");
-					setThreads([]);
-					return;
-				}
-
-				setThreads(threadList);
-			} catch (error) {
-				console.error("Threadsの読み込みに失敗しました:", error);
-				setThreads([]);
-			} finally {
-				setIsThreadsLoading(false);
-			}
-		},
-		[userId]
-	);
 
 	// 新しいスレッドを作成
 	const createNewThread = useCallback(
@@ -330,24 +396,17 @@ export function useChatLogic() {
 
 					// チャット履歴を更新
 					if (Array.isArray(messages) && messages.length > 0) {
-						const agentName =
-							selectedAgent?.name ||
-							selectedThread.agentName ||
-							"AI";
-						const systemMessage = {
-							role: "system",
-							content: `${agentName}との会話を再開します。`,
-						};
-
 						console.log(`メッセージ数: ${messages.length}`);
 
-						// メッセージデータを適切に変換
-						const formattedMessages = messages.map(formatMessage);
+						// メッセージデータを適切に変換し、nullを除外
+						const formattedMessages = messages
+							.map(formatMessage)
+							.filter((msg): msg is ChatMessage => msg !== null); // nullを除外するフィルター
 
 						// 形式変換後のメッセージをログに出力
 						console.log("変換後のメッセージ:", formattedMessages);
 
-						setChatHistory([systemMessage, ...formattedMessages]);
+						setChatHistory([...formattedMessages]);
 					} else {
 						console.warn(
 							"スレッドのメッセージが取得できないか空です:",
@@ -425,16 +484,28 @@ export function useChatLogic() {
 	);
 
 	// 新しい会話を開始
-	const startNewChat = useCallback(() => {
+	const startNewChat = useCallback(async () => {
 		// 現在の会話をクリア
 		setChatHistory([]);
 		setCurrentThreadId(null);
 		setStreamError(null);
 
+		if (!selectedAgent) {
+			console.error("Error: No agent selected to start a new chat.");
+			// 必要であればユーザーにエージェント選択を促すメッセージを表示
+			setChatHistory([
+				{
+					role: "system",
+					content:
+						"エラー: 会話を開始するエージェントが選択されていません。サイドバーからエージェントを選択してください。",
+				},
+			]);
+			return;
+		}
+
 		// mastraAPIの存在チェック
 		if (typeof window === "undefined" || !window.mastraAPI) {
 			console.error("Error: window.mastraAPI is undefined");
-			// エラーメッセージを表示
 			setChatHistory([
 				{
 					role: "system",
@@ -445,13 +516,43 @@ export function useChatLogic() {
 			return;
 		}
 
-		// ボタンクリック時にエージェント一覧を読み込む
-		console.log("Loading agents for new chat...");
-		loadAgents();
-
-		// エージェント選択ダイアログを開く
-		setIsAgentSelectionOpen(true);
-	}, [loadAgents]);
+		// 選択中のエージェントで新しいスレッドを作成
+		console.log(`Starting new chat with agent: ${selectedAgent.id}`);
+		try {
+			const initialTitle = `${selectedAgent.name}との新しい会話`;
+			const thread = await createNewThread(
+				selectedAgent.id,
+				initialTitle
+			);
+			if (thread) {
+				setCurrentThreadId(thread.id);
+				setChatHistory([
+					{
+						role: "system",
+						content: `${selectedAgent.name}との新しい会話を開始しました。メッセージを入力してください。`,
+					},
+				]);
+			} else {
+				console.error(
+					"Failed to create new thread for the selected agent."
+				);
+				setChatHistory([
+					{
+						role: "system",
+						content: "新しい会話の作成に失敗しました。",
+					},
+				]);
+			}
+		} catch (error) {
+			console.error("Error starting new chat:", error);
+			setChatHistory([
+				{
+					role: "system",
+					content: `新しい会話の開始中にエラーが発生しました: ${error instanceof Error ? error.message : "不明なエラー"}`,
+				},
+			]);
+		}
+	}, [selectedAgent, createNewThread]);
 
 	// エージェントを選択したときの処理
 	const handleAgentSelect = useCallback(
@@ -603,7 +704,7 @@ export function useChatLogic() {
 				userId
 			);
 
-			// ストリーミング完了後、タイトルを更新
+			// ストリーミング完了後、タイトル更新とArtifactビューのチェック
 			await handleStreamComplete();
 		} catch (error: any) {
 			console.error("Error in sendMessage:", error);
@@ -676,8 +777,14 @@ export function useChatLogic() {
 						console.log("Fallback API call succeeded");
 						setStreamError(null);
 
-						// フォールバックでも成功した場合、タイトルを更新
-						await handleStreamComplete();
+						// フォールバックでも成功した場合、タイトル更新とArtifactビューのチェック
+						if (isHtmlContent(responseContent)) {
+							console.log(
+								"HTMLコンテンツを検出しました (Fallback)。Artifactビューを開きます。"
+							);
+							setArtifactContent(responseContent);
+							setIsArtifactOpen(true);
+						}
 					}
 				}
 			} catch (fallbackError) {
@@ -698,6 +805,8 @@ export function useChatLogic() {
 		handleChunk,
 		userId,
 		handleStreamComplete,
+		setArtifactContent,
+		setIsArtifactOpen,
 	]);
 
 	// マウント時にAPIの存在チェックとエージェント読み込みを行う
@@ -777,5 +886,9 @@ export function useChatLogic() {
 		sendMessage,
 		selectThread,
 		handleDeleteThread,
+		isArtifactOpen,
+		setIsArtifactOpen,
+		artifactContent,
+		setArtifactContent,
 	};
 }

@@ -1,6 +1,6 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
 	Send,
@@ -10,6 +10,7 @@ import {
 	MessageSquare,
 	MoreHorizontal,
 	Trash2,
+	X,
 } from "lucide-react";
 import {
 	Sidebar,
@@ -36,6 +37,7 @@ import {
 import { ChatSidebar } from "@/components/chat/ChatSidebar";
 import { ChatArea } from "@/components/chat/ChatArea";
 import { AgentSelectionDialog } from "@/components/chat/AgentSelectionDialog";
+import { ArtifactView } from "@/components/chat/ArtifactView";
 import { useChatLogic } from "@/hooks/useChatLogic";
 import { Agent, Thread, ChatMessage } from "@/types/chat";
 import {
@@ -44,6 +46,20 @@ import {
 	DropdownMenuItem,
 	DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+// グローバルスコープに関数を公開するための型定義 (Preloadで公開したAPI)
+declare global {
+	interface Window {
+		electronShell: {
+			openExternalLink: (
+				url: string
+			) => Promise<{ success: boolean; error?: string }>;
+		};
+		// 他のAPI定義...
+	}
+}
 
 // Agent選択ダイアログコンポーネント
 function CustomAgentSelectionDialog({
@@ -142,6 +158,9 @@ function App() {
 		sendMessage,
 		selectThread,
 		handleDeleteThread,
+		isArtifactOpen,
+		setIsArtifactOpen,
+		artifactContent,
 	} = useChatLogic();
 
 	// メッセージが追加されたら自動スクロール
@@ -156,6 +175,36 @@ function App() {
 		setSelectedAgent(null);
 		setChatHistory([]);
 		setCurrentThreadId(null);
+	};
+
+	// リンククリックハンドラ
+	const handleLinkClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+		const link = event.currentTarget;
+		const href = link.getAttribute("href");
+
+		if (
+			href &&
+			(href.startsWith("http://") || href.startsWith("https://"))
+		) {
+			event.preventDefault(); // デフォルトの画面遷移をキャンセル
+			console.log(`Opening external link: ${href}`);
+			window.electronShell
+				.openExternalLink(href)
+				.then((result) => {
+					if (!result.success) {
+						console.error(
+							"Failed to open external link:",
+							result.error
+						);
+						// 必要に応じてユーザーにエラー通知
+					}
+				})
+				.catch((error) => {
+					console.error("Error calling openExternalLink:", error);
+					// 必要に応じてユーザーにエラー通知
+				});
+		}
+		// http/https以外のリンクはデフォルトの動作（もしあれば）
 	};
 
 	return (
@@ -324,114 +373,165 @@ function App() {
 					)}
 				</Sidebar>
 
-				<div className="flex-1 flex flex-col w-full overflow-hidden">
-					{/* ヘッダー */}
-					<div className="p-4 border-b flex items-center">
-						<SidebarTrigger>
-							<Button
-								variant="ghost"
-								size="icon"
-								className="mr-2"
-							>
-								<Menu className="h-5 w-5" />
-							</Button>
-						</SidebarTrigger>
-						<h1 className="text-xl font-bold">
-							{selectedAgent
-								? selectedAgent.name
-								: "エージェントを選択"}
-						</h1>
-					</div>
-
-					{/* チャットエリア */}
-					<div className="flex-1 p-4 overflow-auto">
-						<div className="space-y-4 max-w-4xl mx-auto">
-							{!selectedAgent ? (
-								<div className="text-center text-muted-foreground py-8">
-									サイドバーからエージェントを選択して会話を開始してください。
-								</div>
-							) : chatHistory.length === 0 && !isLoading ? (
-								<div className="text-center text-muted-foreground py-8">
-									メッセージを送信して会話を開始してください。
-								</div>
-							) : (
-								chatHistory.map((chat, index) => (
-									<Card
-										key={index}
-										className={`${
-											chat.role === "user"
-												? "bg-muted"
-												: ""
-										}`}
+				<ResizablePanelGroup direction="horizontal" className="flex-1">
+					<ResizablePanel
+						defaultSize={isArtifactOpen ? 50 : 100}
+						minSize={30}
+					>
+						<div className="flex-1 flex flex-col w-full h-full overflow-hidden">
+							<div className="p-4 border-b flex items-center shrink-0">
+								<SidebarTrigger>
+									<Button
+										variant="ghost"
+										size="icon"
+										className="mr-2 lg:hidden"
 									>
-										<CardHeader className="py-2">
-											<CardTitle className="text-sm">
-												{chat.role === "user"
-													? "あなた"
-													: chat.role === "assistant"
-														? selectedAgent?.name ||
-															"AI"
-														: "システム"}
-											</CardTitle>
-										</CardHeader>
-										<CardContent className="py-2 whitespace-pre-wrap">
-											{chat.content}
-											{isLoading &&
-												index ===
-													chatHistory.length - 1 &&
-												chat.role === "assistant" && (
-													<span className="animate-pulse">
-														▌
-													</span>
-												)}
-										</CardContent>
-									</Card>
-								))
-							)}
-							{/* 自動スクロール用の参照 */}
-							<div ref={messagesEndRef}></div>
-						</div>
-					</div>
-
-					{/* エラーメッセージの表示 */}
-					{streamError && (
-						<div className="p-2 bg-red-50 border-t border-red-200 text-red-700 text-sm">
-							<p>エラーが発生しました: {streamError}</p>
-						</div>
-					)}
-
-					{/* メッセージ入力欄 - エージェント選択時のみ表示 */}
-					{selectedAgent && (
-						<div className="p-4 border-t">
-							<div className="flex gap-2 max-w-4xl mx-auto">
-								<Input
-									value={message}
-									onChange={(e) => setMessage(e.target.value)}
-									placeholder="メッセージを入力..."
-									onKeyDown={(e) =>
-										e.key === "Enter" &&
-										!e.shiftKey &&
-										sendMessage()
-									}
-									disabled={isLoading}
-								/>
-								<Button
-									onClick={sendMessage}
-									disabled={isLoading || !message.trim()}
-								>
-									{isLoading ? (
-										"送信中..."
-									) : (
-										<Send className="h-4 w-4" />
-									)}
-								</Button>
+										<Menu className="h-5 w-5" />
+									</Button>
+								</SidebarTrigger>
+								<h1 className="text-xl font-bold">
+									{selectedAgent
+										? selectedAgent.name
+										: "エージェントを選択"}
+								</h1>
 							</div>
+
+							<div className="flex-1 p-4 overflow-auto">
+								<div className="space-y-4 max-w-4xl mx-auto">
+									{!selectedAgent ? (
+										<div className="text-center text-muted-foreground py-8">
+											サイドバーからエージェントを選択して会話を開始してください。
+										</div>
+									) : chatHistory.length === 0 &&
+									  !isLoading ? (
+										<div className="text-center text-muted-foreground py-8">
+											メッセージを送信して会話を開始してください。
+										</div>
+									) : (
+										chatHistory.map((chat, index) => (
+											<Card
+												key={index}
+												className={`${
+													chat.role === "user"
+														? "bg-muted"
+														: ""
+												}`}
+											>
+												<CardHeader className="py-2">
+													<CardTitle className="text-sm">
+														{chat.role === "user"
+															? "あなた"
+															: chat.role ===
+																  "assistant"
+																? selectedAgent?.name ||
+																	"AI"
+																: "システム"}
+													</CardTitle>
+												</CardHeader>
+												<CardContent className="py-2 prose dark:prose-invert max-w-none">
+													<ReactMarkdown
+														remarkPlugins={[
+															remarkGfm,
+														]}
+														components={{
+															// aタグのレンダリングをカスタマイズ
+															a: ({
+																node,
+																...props
+															}) => (
+																<a
+																	{...props}
+																	onClick={
+																		handleLinkClick
+																	}
+																	target="_blank"
+																	rel="noopener noreferrer"
+																/>
+															),
+														}}
+													>
+														{chat.content}
+													</ReactMarkdown>
+													{isLoading &&
+														index ===
+															chatHistory.length -
+																1 &&
+														chat.role ===
+															"assistant" && (
+															<span className="animate-pulse">
+																▌
+															</span>
+														)}
+												</CardContent>
+											</Card>
+										))
+									)}
+									<div ref={messagesEndRef}></div>
+								</div>
+							</div>
+
+							{streamError && (
+								<div className="p-2 bg-red-50 border-t border-red-200 text-red-700 text-sm">
+									<p>エラーが発生しました: {streamError}</p>
+								</div>
+							)}
+
+							{selectedAgent && (
+								<div className="p-4 border-t">
+									<div className="flex gap-2 max-w-4xl mx-auto items-end">
+										<Textarea
+											value={message}
+											onChange={(e) =>
+												setMessage(e.target.value)
+											}
+											placeholder="メッセージを入力 (Shift+Enterで改行)..."
+											className="min-h-[60px] max-h-[200px] resize-none"
+											rows={1}
+											onKeyDown={(e) => {
+												if (
+													e.key === "Enter" &&
+													!e.shiftKey
+												) {
+													e.preventDefault();
+													sendMessage();
+												}
+											}}
+											disabled={isLoading}
+										/>
+										<Button
+											onClick={sendMessage}
+											disabled={
+												isLoading || !message.trim()
+											}
+											className="self-end mb-[5px]"
+										>
+											{isLoading ? (
+												"送信中..."
+											) : (
+												<Send className="h-4 w-4" />
+											)}
+										</Button>
+									</div>
+								</div>
+							)}
 						</div>
+					</ResizablePanel>
+
+					{isArtifactOpen && (
+						<>
+							<ResizableHandle withHandle />
+							<ResizablePanel defaultSize={50} minSize={20}>
+								<ArtifactView
+									isOpen={isArtifactOpen}
+									content={artifactContent}
+									onClose={() => setIsArtifactOpen(false)}
+								/>
+							</ResizablePanel>
+						</>
 					)}
-				</div>
+				</ResizablePanelGroup>
 			</div>
 
-			{/* Agent選択ダイアログ */}
 			<CustomAgentSelectionDialog
 				open={isAgentSelectionOpen}
 				onOpenChange={setIsAgentSelectionOpen}

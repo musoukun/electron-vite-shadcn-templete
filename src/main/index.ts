@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from "electron";
+import { app, BrowserWindow, ipcMain, dialog, shell } from "electron";
 import path from "path";
 import axios from "axios";
 // @ts-ignore - client-jsの型定義がない場合、エラーを無視
@@ -85,6 +85,30 @@ function createWindow(): void {
 		const url = `http://localhost:5173`;
 		mainWindow.loadURL(url);
 	}
+
+	// レンダラーからのリクエストで外部リンクを開くハンドラ
+	ipcMain.handle("open-external-link", async (_event, url: string) => {
+		try {
+			// URLがhttpまたはhttpsで始まるか基本的なチェック
+			if (
+				url &&
+				(url.startsWith("http://") || url.startsWith("https://"))
+			) {
+				await shell.openExternal(url);
+				console.log(`Opened external link: ${url}`);
+				return { success: true };
+			} else {
+				console.warn(`Attempted to open invalid external link: ${url}`);
+				return { success: false, error: "Invalid URL" };
+			}
+		} catch (error) {
+			console.error(`Failed to open external link: ${url}`, error);
+			return {
+				success: false,
+				error: error instanceof Error ? error.message : "Unknown error",
+			};
+		}
+	});
 }
 
 // Electronのライフサイクルイベント: アプリが初期化されたとき
