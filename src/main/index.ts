@@ -88,7 +88,7 @@ function createWindow(): void {
 }
 
 // Electronのライフサイクルイベント: アプリが初期化されたとき
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
 	createWindow();
 
 	app.on("activate", () => {
@@ -264,7 +264,9 @@ ipcMain.handle(
 
 // スレッド一覧取得ハンドラ
 ipcMain.handle("get-threads", async (event, { agentId, resourceId }) => {
-	console.log(`Getting threads for agent ${agentId}`);
+	console.log(
+		`Getting threads for agent ${agentId} with resourceId ${resourceId || "default"}`
+	);
 
 	try {
 		// MastraClientを使用してメモリスレッド一覧を取得
@@ -273,12 +275,57 @@ ipcMain.handle("get-threads", async (event, { agentId, resourceId }) => {
 			resourceId: resourceId || "default",
 		});
 
+		// エージェント情報を取得して名前をマップする
+		let agentName = "Unknown Agent";
+		try {
+			const allAgents = await mastraClient.getAgents(); // 全エージェント取得
+			// getAgentsは { agentId: agentDetails } 形式のオブジェクトを返す想定
+			if (allAgents && allAgents[agentId]) {
+				const agentDetails = allAgents[agentId];
+				// agentDetailsオブジェクトから名前を探す (プロパティ名はAPI仕様による)
+				agentName =
+					agentDetails.name || agentDetails.modelId || agentId;
+			}
+		} catch (agentError) {
+			console.warn(
+				`エージェント情報の取得に失敗: ${agentId}`,
+				agentError
+			);
+		}
+
+		// 各スレッドにエージェントIDと名前を追加
+		const enhancedThreads = Array.isArray(threads)
+			? threads.map((thread: any) => ({
+					...thread,
+					agentId: agentId, // ハンドラに渡されたagentIdを付与
+					agentName: agentName, // 取得したエージェント名を付与
+				}))
+			: [];
+
+		console.log(
+			`取得したスレッド数 (${agentId}): ${enhancedThreads.length}`
+		);
+
 		return {
 			success: true,
-			threads: threads,
+			threads: enhancedThreads,
 		};
 	} catch (error: any) {
 		console.error("Error in get-threads:", error);
+
+		// メモリが初期化されていない場合、空の配列を返す
+		if (
+			error.message &&
+			error.message.includes("Memory is not initialized")
+		) {
+			console.log("Memory not initialized, returning empty thread list");
+			return {
+				success: true,
+				threads: [],
+				warning: "Memory not initialized",
+			};
+		}
+
 		return {
 			success: false,
 			error: error.message,
@@ -298,7 +345,10 @@ ipcMain.handle(
 				agentId,
 				title: title || "新しい会話",
 				resourceid: resourceId || "default", // 注: APIは小文字のresourceidを使用
-				metadata: {}, // 空のメタデータを追加
+				metadata: {
+					agentId: agentId,
+					agentName: "AI", // メタデータにエージェント名を設定
+				},
 				threadId: `thread_${Date.now()}`, // 新しいスレッドIDを生成
 			});
 
@@ -317,27 +367,46 @@ ipcMain.handle(
 );
 
 // スレッドのメッセージ取得ハンドラ
-ipcMain.handle("get-thread-messages", async (event, { threadId, agentId }) => {
-	console.log(`Getting messages for thread ${threadId}`);
+ipcMain.handle(
+	"get-thread-messages",
+	async (event, { threadId, agentId, resourceId }) => {
+		console.log(`Getting messages for thread ${threadId}`);
 
-	try {
-		// スレッドインスタンスを取得
-		const thread = mastraClient.getMemoryThread(threadId, agentId);
-		// スレッドのメッセージを取得
-		const messages = await thread.getMessages();
+		try {
+			// スレッドインスタンスを取得
+			const thread = mastraClient.getMemoryThread(threadId, agentId);
+			// スレッドのメッセージを取得
+			const messages = await thread.getMessages();
 
-		return {
-			success: true,
-			messages: messages,
-		};
-	} catch (error: any) {
-		console.error("Error in get-thread-messages:", error);
-		return {
-			success: false,
-			error: error.message,
-		};
+			return {
+				success: true,
+				messages: messages,
+			};
+		} catch (error: any) {
+			console.error("Error in get-thread-messages:", error);
+
+			// メモリが初期化されていない場合、空の配列を返す
+			if (
+				error.message &&
+				error.message.includes("Memory is not initialized")
+			) {
+				console.log(
+					"Memory not initialized, returning empty message list"
+				);
+				return {
+					success: true,
+					messages: [],
+					warning: "Memory not initialized",
+				};
+			}
+
+			return {
+				success: false,
+				error: error.message,
+			};
+		}
 	}
-});
+);
 
 // スレッドタイトル更新ハンドラ
 ipcMain.handle(
@@ -374,6 +443,25 @@ ipcMain.handle(
 		}
 	}
 );
+
+// スレッド削除ハンドラ
+ipcMain.handle("delete-thread", async (event, { threadId, agentId }) => {
+	console.log(`Deleting thread: ${threadId} for agent: ${agentId}`);
+	try {
+		// スレッドインスタンスを取得
+		const thread = mastraClient.getMemoryThread(threadId, agentId);
+		// スレッドを削除
+		await thread.delete();
+		console.log(`Thread deleted successfully: ${threadId}`);
+		return { success: true };
+	} catch (error: any) {
+		console.error(`Error deleting thread ${threadId}:`, error);
+		return {
+			success: false,
+			error: error.message || "スレッドの削除中にエラーが発生しました",
+		};
+	}
+});
 
 // メタデータタグを除去する関数
 function removeMetadataTags(text: string): string {

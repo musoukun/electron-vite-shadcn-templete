@@ -385,6 +385,49 @@ try {
 			}
 		},
 
+		// ユーザーのすべてのスレッドを取得（エージェント横断）
+		getAllThreads: async (resourceId?: string) => {
+			try {
+				// デフォルトのリソースID値
+				const defaultResourceId = "default";
+
+				// 使用するリソースID
+				const actualResourceId = resourceId || defaultResourceId;
+
+				console.log(
+					`Getting all threads for resourceId: ${actualResourceId}`
+				);
+
+				// IPCを使用してメインプロセスに全スレッド取得をリクエスト
+				const result = await ipcRenderer.invoke("get-all-threads", {
+					resourceId: actualResourceId,
+				});
+
+				// エラーメッセージがある場合は例外をスロー
+				if (result.error) {
+					throw new Error(result.error);
+				}
+
+				// 警告がある場合はログに出力
+				if (result.warning) {
+					console.warn(`警告: ${result.warning}`);
+				}
+
+				const threads = result.threads || [];
+				console.log(`全スレッド数: ${threads.length}`);
+
+				if (threads.length > 0) {
+					console.log("最初のスレッド例:", threads[0]);
+				}
+
+				return threads;
+			} catch (error) {
+				console.error("全スレッド一覧の取得に失敗しました:", error);
+				// エラーを上位に伝播
+				throw error;
+			}
+		},
+
 		// スレッドのメッセージを取得
 		getThreadMessages: async (
 			threadId: string,
@@ -547,6 +590,35 @@ try {
 				return result.thread;
 			} catch (error) {
 				console.error("スレッドタイトルの更新に失敗しました:", error);
+				throw error;
+			}
+		},
+
+		// スレッドを削除
+		deleteThread: async (threadId: string, agentId: string) => {
+			try {
+				console.log(
+					`Deleting thread: ${threadId} for agent: ${agentId}`
+				);
+				// IPCを使用してメインプロセスに削除をリクエスト
+				const result = await ipcRenderer.invoke("delete-thread", {
+					threadId,
+					agentId,
+				});
+
+				if (!result.success) {
+					throw new Error(
+						result.error || "スレッドの削除に失敗しました"
+					);
+				}
+
+				console.log(`Thread deleted successfully: ${threadId}`);
+				return { success: true };
+			} catch (error) {
+				console.error(
+					`スレッド ${threadId} の削除に失敗しました:`,
+					error
+				);
 				throw error;
 			}
 		},
