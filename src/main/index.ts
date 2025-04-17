@@ -125,9 +125,11 @@ ipcMain.handle("dialog:openFile", async () => {
 // ストリーミング用のIPC通信ハンドラ - Mastra SDK版
 ipcMain.handle(
 	"start-stream",
-	async (event, { agentId, messages, threadId }) => {
+	async (event, { agentId, messages, threadId, resourceId }) => {
 		console.log(`Start streaming for agent ${agentId}`);
 		console.log("Messages:", JSON.stringify(messages));
+		console.log("Thread ID:", threadId || "No thread ID provided");
+		console.log("Resource ID:", resourceId || "No resource ID provided");
 
 		try {
 			// ユーザーメッセージのみを抽出（現在のユースケースに合わせる）
@@ -144,20 +146,28 @@ ipcMain.handle(
 			// MastraClientを使用してエージェントを取得
 			const agent = mastraClient.getAgent(agentId);
 
-			// ストリーミングレスポンスを取得
+			// ストリーミングレスポンスを取得（スレッドIDとリソースIDを使用）
 			const response = await agent.stream({
 				messages: userMessages,
 				threadId: threadId || undefined,
+				resourceId: resourceId || "default", // クライアントから送信されたリソースIDを使用
 			});
 
 			// ストリーミングレスポンスを処理
 			await response.processDataStream({
 				onTextPart: (text) => {
-					// テキストチャンクをレンダラーに送信
-					if (currentWindow && !currentWindow.isDestroyed()) {
+					// ワーキングメモリタグを除去
+					const cleanedText = removeMetadataTags(text);
+
+					// テキストチャンクをレンダラーに送信（空でなければ）
+					if (
+						cleanedText.trim() &&
+						currentWindow &&
+						!currentWindow.isDestroyed()
+					) {
 						currentWindow.webContents.send(
 							"stream-chunk",
-							`0:"${text}"`
+							`0:"${cleanedText}"`
 						);
 					}
 				},
@@ -196,8 +206,13 @@ ipcMain.handle(
 // フォールバック用の通常リクエストハンドラ - Mastra SDK版
 ipcMain.handle(
 	"send-message",
-	async (event, { agentId, messages, threadId }) => {
+	async (event, { agentId, messages, threadId, resourceId }) => {
 		console.log(`Sending message to agent ${agentId}`);
+		console.log("With threadId:", threadId || "No thread ID provided");
+		console.log(
+			"With resourceId:",
+			resourceId || "No resource ID provided"
+		);
 
 		try {
 			// メッセージを準備（システムメッセージは除外）
@@ -213,15 +228,27 @@ ipcMain.handle(
 			// MastraClientを使用してエージェントを取得
 			const agent = mastraClient.getAgent(agentId);
 
-			// 非ストリーミングレスポンスを取得
+			// 非ストリーミングレスポンスを取得（スレッドIDとリソースIDを使用）
 			const response = await agent.generate({
 				messages: messagesToSend,
 				threadId: threadId || undefined,
+				resourceId: resourceId || "default", // クライアントから送信されたリソースIDを使用
 			});
+
+			// レスポンスからテキストを抽出し、メタデータタグを除去
+			let responseText = "";
+			if (typeof response === "string") {
+				responseText = removeMetadataTags(response);
+			} else if (response && typeof response.text === "string") {
+				responseText = removeMetadataTags(response.text);
+			} else if (response && typeof response === "object") {
+				// オブジェクトの場合はJSON文字列に変換（必要に応じて）
+				responseText = JSON.stringify(response);
+			}
 
 			return {
 				success: true,
-				response: response,
+				response: responseText,
 			};
 		} catch (error: any) {
 			console.error("Error in send-message:", error);
@@ -232,3 +259,130 @@ ipcMain.handle(
 		}
 	}
 );
+
+// メモリ関連のハンドラを追加
+
+// スレッド一覧取得ハンドラ
+ipcMain.handle("get-threads", async (event, { agentId, resourceId }) => {
+	console.log(`Getting threads for agent ${agentId}`);
+
+	try {
+		// MastraClientを使用してメモリスレッド一覧を取得
+		const threads = await mastraClient.getMemoryThreads({
+			agentId,
+			resourceId: resourceId || "default",
+		});
+
+		return {
+			success: true,
+			threads: threads,
+		};
+	} catch (error: any) {
+		console.error("Error in get-threads:", error);
+		return {
+			success: false,
+			error: error.message,
+		};
+	}
+});
+
+// スレッド作成ハンドラ
+ipcMain.handle(
+	"create-thread",
+	async (event, { agentId, title, resourceId }) => {
+		console.log(`Creating thread for agent ${agentId}`);
+
+		try {
+			// MastraClientを使用して新しいスレッドを作成
+			const thread = await mastraClient.createMemoryThread({
+				agentId,
+				title: title || "新しい会話",
+				resourceid: resourceId || "default", // 注: APIは小文字のresourceidを使用
+				metadata: {}, // 空のメタデータを追加
+				threadId: `thread_${Date.now()}`, // 新しいスレッドIDを生成
+			});
+
+			return {
+				success: true,
+				thread: thread,
+			};
+		} catch (error: any) {
+			console.error("Error in create-thread:", error);
+			return {
+				success: false,
+				error: error.message,
+			};
+		}
+	}
+);
+
+// スレッドのメッセージ取得ハンドラ
+ipcMain.handle("get-thread-messages", async (event, { threadId, agentId }) => {
+	console.log(`Getting messages for thread ${threadId}`);
+
+	try {
+		// スレッドインスタンスを取得
+		const thread = mastraClient.getMemoryThread(threadId, agentId);
+		// スレッドのメッセージを取得
+		const messages = await thread.getMessages();
+
+		return {
+			success: true,
+			messages: messages,
+		};
+	} catch (error: any) {
+		console.error("Error in get-thread-messages:", error);
+		return {
+			success: false,
+			error: error.message,
+		};
+	}
+});
+
+// スレッドタイトル更新ハンドラ
+ipcMain.handle(
+	"update-thread-title",
+	async (event, { threadId, agentId, title, resourceId }) => {
+		console.log(`Updating title for thread ${threadId} to "${title}"`);
+		console.log(
+			`Agent ID: ${agentId}, Resource ID: ${resourceId || "default"}`
+		);
+
+		try {
+			// スレッドインスタンスを取得
+			const thread = mastraClient.getMemoryThread(threadId, agentId);
+
+			// スレッドのタイトルを更新
+			const updatedThread = await thread.update({
+				title: title,
+				resourceid: resourceId || "default",
+				metadata: {}, // 空のメタデータを追加
+			});
+
+			console.log("Thread title updated successfully:", updatedThread);
+
+			return {
+				success: true,
+				thread: updatedThread,
+			};
+		} catch (error: any) {
+			console.error("Error in update-thread-title:", error);
+			return {
+				success: false,
+				error: error.message,
+			};
+		}
+	}
+);
+
+// メタデータタグを除去する関数
+function removeMetadataTags(text: string): string {
+	// ワーキングメモリタグを除去
+	return (
+		text
+			.replace(/<working_memory>[\s\S]*?<\/working_memory>/g, "")
+			// その他のメタデータタグも必要に応じて除去
+			.replace(/<metadata>[\s\S]*?<\/metadata>/g, "")
+			.trim()
+	);
+}

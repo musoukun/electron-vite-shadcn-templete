@@ -12,17 +12,33 @@ interface MastraAPI {
 	sendMessageToAgent: (
 		agentId: string,
 		messages: any[],
-		threadId?: string
+		threadId?: string,
+		resourceId?: string
 	) => Promise<any>;
 	streamMessageFromAgent: (
 		agentId: string,
 		messages: any[],
 		threadId?: string,
-		onChunk?: (chunk: string) => void
+		onChunk?: (chunk: string) => void,
+		resourceId?: string
 	) => Promise<any>;
-	createThread: (agentId: string, title?: string) => Promise<any>;
+	createThread: (
+		agentId: string,
+		title?: string,
+		resourceId?: string
+	) => Promise<any>;
 	getThreads: (agentId: string, resourceId?: string) => Promise<any[]>;
-	getThreadMessages: (threadId: string, agentId: string) => Promise<any[]>;
+	getThreadMessages: (
+		threadId: string,
+		agentId: string,
+		resourceId?: string
+	) => Promise<any[]>;
+	updateThreadTitle: (
+		threadId: string,
+		agentId: string,
+		title: string,
+		resourceId?: string
+	) => Promise<any>;
 }
 
 interface Window {

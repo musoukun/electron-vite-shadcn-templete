@@ -41,6 +41,20 @@ interface ChatMessage {
 	createdAt?: string;
 }
 
+// ユーザー識別のためのIDを生成する関数
+function generateUserId(): string {
+	// ユーザーIDがローカルストレージに保存されていれば使用
+	const savedUserId = localStorage.getItem("mastra_user_id");
+	if (savedUserId) {
+		return savedUserId;
+	}
+
+	// 新しいユーザーIDを生成して保存
+	const newUserId = `user_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 9)}`;
+	localStorage.setItem("mastra_user_id", newUserId);
+	return newUserId;
+}
+
 // Agent選択ダイアログコンポーネント
 function AgentSelectionDialog({
 	open,
@@ -128,6 +142,9 @@ function App() {
 	const [isAgentSelectionOpen, setIsAgentSelectionOpen] = useState(false);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
 
+	// ユーザーIDを生成
+	const userId = generateUserId();
+
 	// メッセージが追加されたら自動スクロール
 	useEffect(() => {
 		if (messagesEndRef.current) {
@@ -151,6 +168,43 @@ function App() {
 			}
 			return newHistory;
 		});
+	};
+
+	// AIのレスポンスが完了した時のイベントハンドラ
+	const handleStreamComplete = async () => {
+		// 現在のスレッドIDと選択中のエージェントがあれば処理
+		if (currentThreadId && selectedAgent) {
+			try {
+				// チャット履歴からAIの最初の応答を取得
+				const aiResponses = chatHistory.filter(
+					(msg) => msg.role === "assistant"
+				);
+				if (aiResponses.length > 0) {
+					// AIの最初の応答から先頭10文字を取得
+					const aiResponse = aiResponses[0].content;
+					const titleFromResponse =
+						aiResponse.length > 10
+							? `${aiResponse.substring(0, 10)}...`
+							: aiResponse;
+
+					// スレッドタイトルを更新
+					console.log(
+						`スレッドタイトルを更新します: ${titleFromResponse}`
+					);
+					await window.mastraAPI.updateThreadTitle(
+						currentThreadId,
+						selectedAgent.id,
+						titleFromResponse,
+						userId
+					);
+
+					// スレッド一覧を更新（タイトル変更を反映するため）
+					await loadThreads(selectedAgent.id);
+				}
+			} catch (error) {
+				console.error("スレッドタイトル更新に失敗しました:", error);
+			}
+		}
 	};
 
 	// 利用可能なエージェントを読み込む
@@ -201,6 +255,279 @@ function App() {
 		}
 	};
 
+	// スレッド一覧を読み込む
+	const loadThreads = async (agentId: string) => {
+		if (!agentId) return;
+
+		setIsThreadsLoading(true);
+		try {
+			// APIが利用可能かチェック
+			if (!window.mastraAPI || !window.mastraAPI.getThreads) {
+				console.error(
+					"Error: window.mastraAPI.getThreads is undefined"
+				);
+				setThreads([]);
+				return;
+			}
+
+			// ユーザーIDをリソースIDとして使用
+			console.log(
+				`Loading threads for agent: ${agentId}, resourceId: ${userId}`
+			);
+			const threadList = await window.mastraAPI.getThreads(
+				agentId,
+				userId
+			);
+			console.log("Thread list received:", threadList);
+
+			if (!threadList || !Array.isArray(threadList)) {
+				console.warn("API returned invalid thread list");
+				setThreads([]);
+				return;
+			}
+
+			setThreads(threadList);
+		} catch (error) {
+			console.error("Threadsの読み込みに失敗しました:", error);
+			setThreads([]);
+		} finally {
+			setIsThreadsLoading(false);
+		}
+	};
+
+	// 新しいスレッドを作成
+	const createNewThread = async (agentId: string, title?: string) => {
+		if (!agentId) return null;
+
+		try {
+			if (!window.mastraAPI || !window.mastraAPI.createThread) {
+				console.error(
+					"Error: window.mastraAPI.createThread is undefined"
+				);
+				return null;
+			}
+
+			console.log(
+				`Creating new thread for agent: ${agentId}, resourceId: ${userId}`
+			);
+			const thread = await window.mastraAPI.createThread(
+				agentId,
+				title || "新しい会話",
+				userId
+			);
+			console.log("New thread created:", thread);
+
+			// スレッド一覧を更新
+			await loadThreads(agentId);
+
+			return thread;
+		} catch (error) {
+			console.error("スレッドの作成に失敗しました:", error);
+			return null;
+		}
+	};
+
+	// マウント時にAPIの存在チェックを行う
+	useEffect(() => {
+		// ロード時にAPIの存在をチェック
+		console.log("App mounted, checking APIs availability");
+		console.log("window.electronAPI available:", !!window.electronAPI);
+		console.log("window.mastraAPI available:", !!window.mastraAPI);
+
+		// mastraAPIの存在チェック
+		if (typeof window === "undefined" || !window.mastraAPI) {
+			console.error("Error: window.mastraAPI is undefined in useEffect");
+
+			// フォールバック: _mastraAPIという名前でグローバルに設定されている可能性をチェック
+			// @ts-ignore
+			if (window._mastraAPI) {
+				console.log("Found _mastraAPI, using as fallback");
+				// @ts-ignore
+				window.mastraAPI = window._mastraAPI;
+				console.log("Fallback mastraAPI set:", !!window.mastraAPI);
+				return;
+			}
+
+			// それでも見つからない場合はエラーメッセージを表示
+			setChatHistory([
+				{
+					role: "system",
+					content:
+						"APIの初期化に失敗しました。アプリケーションを再起動してください。",
+				},
+			]);
+			return;
+		}
+
+		// アプリ起動時にエージェント一覧を読み込む
+		console.log("mastraAPI is available, loading agents...");
+		loadAgents().then(async () => {
+			// エージェント一覧の読み込みが完了したら、最初のエージェントを選択
+			if (agents.length > 0) {
+				console.log(
+					"自動的に最初のエージェントを選択します:",
+					agents[0].name
+				);
+				setSelectedAgent(agents[0]);
+
+				// 選択したエージェントのスレッド一覧を読み込む
+				await loadThreads(agents[0].id);
+
+				// スレッドが存在する場合は最初のスレッドを選択
+				if (threads.length > 0) {
+					console.log(
+						"最初のスレッドを選択します:",
+						threads[0].title
+					);
+					selectThread(threads[0].id);
+				} else {
+					// スレッドが存在しない場合は新しい会話を開始する準備
+					setChatHistory([
+						{
+							role: "system",
+							content: `${agents[0].name}との新しい会話を開始します。メッセージを入力してください。`,
+						},
+					]);
+				}
+			}
+		});
+	}, []);
+
+	// スレッドを選択する関数
+	const selectThread = async (threadId: string) => {
+		if (!selectedAgent || !threadId) return;
+
+		try {
+			setIsLoading(true);
+
+			// スレッドのメッセージを取得
+			if (!window.mastraAPI || !window.mastraAPI.getThreadMessages) {
+				console.error(
+					"Error: window.mastraAPI.getThreadMessages is undefined"
+				);
+				return;
+			}
+
+			console.log(
+				`Getting messages for thread: ${threadId}, agent: ${selectedAgent.id}, resourceId: ${userId}`
+			);
+
+			try {
+				const messages = await window.mastraAPI.getThreadMessages(
+					threadId,
+					selectedAgent.id,
+					userId
+				);
+				console.log("Thread messages received:", messages);
+
+				// メッセージの形式を確認するためのログ
+				if (Array.isArray(messages) && messages.length > 0) {
+					console.log(
+						"最初のメッセージ:",
+						JSON.stringify(messages[0])
+					);
+
+					// メッセージの構造をより詳細にログに出力
+					if (typeof messages[0] === "object") {
+						console.log("メッセージの構造:");
+						Object.keys(messages[0]).forEach((key) => {
+							console.log(`- ${key}: ${typeof messages[0][key]}`);
+						});
+					}
+				}
+
+				// チャット履歴を更新
+				if (Array.isArray(messages) && messages.length > 0) {
+					const systemMessage = {
+						role: "system",
+						content: `${selectedAgent.name}との会話を再開します。`,
+					};
+
+					console.log(`メッセージ数: ${messages.length}`);
+
+					// メッセージデータを適切に変換
+					const formattedMessages = messages.map((msg: any) => {
+						// メッセージが直接文字列の場合（旧フォーマット）
+						if (typeof msg === "string") {
+							return {
+								role: "assistant", // デフォルトはAIの応答
+								content: msg,
+							};
+						}
+
+						// メッセージがオブジェクトの場合
+						const role =
+							msg.role || (msg.isUser ? "user" : "assistant");
+
+						// contentフィールドの取得を試みる
+						let content = "";
+						if (typeof msg.content === "string") {
+							content = msg.content;
+						} else if (msg.message) {
+							content =
+								typeof msg.message === "string"
+									? msg.message
+									: JSON.stringify(msg.message);
+						} else if (msg.text) {
+							content =
+								typeof msg.text === "string"
+									? msg.text
+									: JSON.stringify(msg.text);
+						} else {
+							// フィールドが見つからない場合はオブジェクト全体をJSONとして表示
+							content = JSON.stringify(msg);
+						}
+
+						return {
+							role,
+							content,
+							id: msg.id || msg._id,
+							createdAt: msg.createdAt || msg.timestamp,
+						};
+					});
+
+					// 形式変換後のメッセージをログに出力
+					console.log("変換後のメッセージ:", formattedMessages);
+
+					setChatHistory([systemMessage, ...formattedMessages]);
+				} else {
+					console.warn(
+						"スレッドのメッセージが取得できないか空です:",
+						messages
+					);
+					// メッセージが取得できない場合は空のチャット履歴を設定
+					setChatHistory([
+						{
+							role: "system",
+							content: `${selectedAgent.name}との新しい会話を開始しました。メッセージを入力してください。`,
+						},
+					]);
+				}
+			} catch (error) {
+				console.error("メッセージ取得中にエラー発生:", error);
+				throw error;
+			}
+
+			// 現在のスレッドIDを設定
+			setCurrentThreadId(threadId);
+		} catch (error) {
+			console.error("スレッドメッセージの取得に失敗しました:", error);
+			if (error instanceof Error) {
+				console.error("エラーの詳細:", error.message);
+				console.error("スタックトレース:", error.stack);
+			}
+			setChatHistory([
+				{
+					role: "system",
+					content:
+						"スレッドメッセージの取得に失敗しました。新しいメッセージで会話を開始してください。",
+				},
+			]);
+		} finally {
+			setIsLoading(false);
+		}
+	};
+
 	// 新しい会話を開始
 	const startNewChat = () => {
 		// 現在の会話をクリア
@@ -236,19 +563,51 @@ function App() {
 		setIsAgentSelectionOpen(false);
 		setStreamError(null);
 
-		// スレッド作成処理をスキップ - メモリ機能が未実装のため
 		console.log(`Selected agent: ${agent.id} - ${agent.name}`);
 
-		// 空のチャット履歴を設定し、会話準備完了状態にする
-		setChatHistory([
-			{
-				role: "system",
-				content: `${agent.name}との新しい会話を開始しました。メッセージを入力してください。`,
-			},
-		]);
+		// エージェント用のスレッド一覧を読み込み
+		await loadThreads(agent.id);
 
-		// スレッドIDは使用しない（null）
-		setCurrentThreadId(null);
+		try {
+			// 新しいスレッドを作成してそれを使用
+			const initialTitle = `${agent.name}との会話`;
+			const thread = await createNewThread(agent.id, initialTitle);
+			if (thread) {
+				setCurrentThreadId(thread.id);
+
+				// 空のチャット履歴を設定し、会話準備完了状態にする
+				setChatHistory([
+					{
+						role: "system",
+						content: `${agent.name}との新しい会話を開始しました。メッセージを入力してください。`,
+					},
+				]);
+			} else {
+				// スレッド作成に失敗した場合はスレッドIDなしで続行
+				setCurrentThreadId(null);
+
+				// 空のチャット履歴を設定し、会話準備完了状態にする
+				setChatHistory([
+					{
+						role: "system",
+						content: `${agent.name}との新しい会話を開始しました（メモリなし）。メッセージを入力してください。`,
+					},
+				]);
+			}
+		} catch (error) {
+			console.error("スレッド作成に失敗しました:", error);
+
+			// エラー時はスレッドIDなしで続行
+			setCurrentThreadId(null);
+
+			// 空のチャット履歴を設定し、会話準備完了状態にする
+			setChatHistory([
+				{
+					role: "system",
+					content: `${agent.name}との新しい会話を開始しました（メモリなし）。メッセージを入力してください。`,
+				},
+			]);
+		}
 	};
 
 	// メッセージ送信処理
@@ -288,14 +647,40 @@ function App() {
 
 		console.log("Sending messages:", messagesToSend);
 
+		// 新しいスレッドを作成する場合、仮のタイトルを設定
+		if (!currentThreadId) {
+			// 仮のタイトルとしてユーザーメッセージから先頭10文字を取得
+			const temporaryTitle =
+				userMessage.content.length > 10
+					? `${userMessage.content.substring(0, 10)}...`
+					: userMessage.content;
+
+			try {
+				// スレッド作成に仮タイトルを使用
+				const thread = await createNewThread(
+					selectedAgent.id,
+					temporaryTitle
+				);
+				if (thread) {
+					setCurrentThreadId(thread.id);
+				}
+			} catch (error) {
+				console.error("新しいスレッドの作成に失敗しました:", error);
+			}
+		}
+
 		try {
 			// マストラAPIを使用してメッセージを送信（IPC版のストリーミングメソッド）
 			await window.mastraAPI.streamMessageFromAgent(
 				selectedAgent.id,
 				messagesToSend,
 				currentThreadId || undefined,
-				handleChunk
+				handleChunk,
+				userId
 			);
+
+			// ストリーミング完了後、タイトルを更新
+			await handleStreamComplete();
 		} catch (error: any) {
 			console.error("Error in sendMessage:", error);
 
@@ -325,7 +710,8 @@ function App() {
 					const response = await window.mastraAPI.sendMessageToAgent(
 						selectedAgent.id,
 						messagesToSend,
-						currentThreadId || undefined
+						currentThreadId || undefined,
+						userId
 					);
 
 					// 安全にレスポンステキストを抽出
@@ -365,6 +751,9 @@ function App() {
 
 						console.log("Fallback API call succeeded");
 						setStreamError(null);
+
+						// フォールバックでも成功した場合、タイトルを更新
+						await handleStreamComplete();
 					}
 				}
 			} catch (fallbackError) {
@@ -375,43 +764,6 @@ function App() {
 			setIsLoading(false);
 		}
 	};
-
-	// マウント時にAPIの存在チェックを行う
-	useEffect(() => {
-		// ロード時にAPIの存在をチェック
-		console.log("App mounted, checking APIs availability");
-		console.log("window.electronAPI available:", !!window.electronAPI);
-		console.log("window.mastraAPI available:", !!window.mastraAPI);
-
-		// mastraAPIの存在チェック
-		if (typeof window === "undefined" || !window.mastraAPI) {
-			console.error("Error: window.mastraAPI is undefined in useEffect");
-
-			// フォールバック: _mastraAPIという名前でグローバルに設定されている可能性をチェック
-			// @ts-ignore
-			if (window._mastraAPI) {
-				console.log("Found _mastraAPI, using as fallback");
-				// @ts-ignore
-				window.mastraAPI = window._mastraAPI;
-				console.log("Fallback mastraAPI set:", !!window.mastraAPI);
-				return;
-			}
-
-			// それでも見つからない場合はエラーメッセージを表示
-			setChatHistory([
-				{
-					role: "system",
-					content:
-						"APIの初期化に失敗しました。アプリケーションを再起動してください。",
-				},
-			]);
-			return;
-		}
-
-		// 最初のロード時には読み込まない
-		// console.log("mastraAPI is available, loading agents...");
-		// loadAgents();
-	}, []);
 
 	return (
 		<SidebarProvider>
@@ -432,6 +784,37 @@ function App() {
 							<Plus className="mr-2 h-4 w-4" />
 							<span>新しい会話</span>
 						</Button>
+
+						{/* スレッド一覧 */}
+						{isThreadsLoading ? (
+							<div className="text-center p-4 text-sm text-muted-foreground">
+								読み込み中...
+							</div>
+						) : threads.length > 0 ? (
+							<div className="space-y-1">
+								{threads.map((thread) => (
+									<Button
+										key={thread.id}
+										variant={
+											currentThreadId === thread.id
+												? "secondary"
+												: "ghost"
+										}
+										className="w-full justify-start text-sm"
+										onClick={() => selectThread(thread.id)}
+									>
+										<MessageSquare className="mr-2 h-4 w-4" />
+										<span className="truncate">
+											{thread.title || "無題の会話"}
+										</span>
+									</Button>
+								))}
+							</div>
+						) : selectedAgent ? (
+							<div className="text-center p-4 text-sm text-muted-foreground">
+								会話履歴がありません
+							</div>
+						) : null}
 					</SidebarContent>
 
 					{/* アカウント情報 */}

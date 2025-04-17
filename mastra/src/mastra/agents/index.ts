@@ -4,6 +4,7 @@ import { MCPConfiguration } from "@mastra/mcp";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
+import { memory } from "../memory"; // メモリモジュールをインポート
 
 /**
  * エージェント定義モジュール
@@ -29,6 +30,10 @@ const baseInstructions = `
 - ツールが利用可能な場合は、適切なタイミングでツールを使用してください
 - ツールの使用前に、必要なパラメータを適切に設定してください
 - ツールの結果を適切に解釈し、ユーザーにわかりやすく説明してください
+
+【メモリ機能について】
+- 以前のやり取りを覚えておき、会話の文脈を維持してください
+- ユーザーの好みや関心事を覚えて、応答をパーソナライズしてください
 `;
 
 /**
@@ -36,18 +41,21 @@ const baseInstructions = `
  * name: エージェント名
  * model: 使用するモデル
  * instructions: エージェントへの指示文
+ * memory: メモリ設定
  */
 export const agentConfigs = [
 	{
 		name: "Gemini Flash Experimental",
 		model: google("gemini-2.0-flash-exp"),
 		instructions: baseInstructions,
+		memory: memory, // メモリを追加
 	},
 	// 以下に他のエージェント設定を追加できます
 	// {
 	//   name: "Claude 3 Haiku",
 	//   model: anthropic("claude-3-haiku"),
 	//   instructions: baseInstructions,
+	//   memory: memory, // メモリを追加
 	// },
 ];
 
@@ -139,6 +147,7 @@ class AgentManager {
 					model: config.model,
 					instructions: config.instructions,
 					tools: {}, // 初期状態では空のツール設定
+					memory: config.memory, // メモリを追加
 				})
 		);
 
