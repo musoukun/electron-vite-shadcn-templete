@@ -11,6 +11,7 @@ import {
 	MoreHorizontal,
 	Trash2,
 	X,
+	LayoutGrid,
 } from "lucide-react";
 import {
 	Sidebar,
@@ -48,6 +49,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { extractHtmlCodeBlock } from "@/utils/chat-utils";
 
 // グローバルスコープに関数を公開するための型定義 (Preloadで公開したAPI)
 declare global {
@@ -161,6 +163,7 @@ function App() {
 		isArtifactOpen,
 		setIsArtifactOpen,
 		artifactContent,
+		setArtifactContent,
 	} = useChatLogic();
 
 	// メッセージが追加されたら自動スクロール
@@ -408,63 +411,89 @@ function App() {
 											メッセージを送信して会話を開始してください。
 										</div>
 									) : (
-										chatHistory.map((chat, index) => (
-											<Card
-												key={index}
-												className={`${
-													chat.role === "user"
-														? "bg-muted"
-														: ""
-												}`}
-											>
-												<CardHeader className="py-2">
-													<CardTitle className="text-sm">
-														{chat.role === "user"
-															? "あなた"
-															: chat.role ===
-																  "assistant"
-																? selectedAgent?.name ||
-																	"AI"
-																: "システム"}
-													</CardTitle>
-												</CardHeader>
-												<CardContent className="py-2 prose dark:prose-invert max-w-none">
-													<ReactMarkdown
-														remarkPlugins={[
-															remarkGfm,
-														]}
-														components={{
-															// aタグのレンダリングをカスタマイズ
-															a: ({
-																node,
-																...props
-															}) => (
-																<a
-																	{...props}
-																	onClick={
-																		handleLinkClick
-																	}
-																	target="_blank"
-																	rel="noopener noreferrer"
-																/>
-															),
-														}}
-													>
-														{chat.content}
-													</ReactMarkdown>
-													{isLoading &&
-														index ===
-															chatHistory.length -
-																1 &&
-														chat.role ===
-															"assistant" && (
-															<span className="animate-pulse">
-																▌
-															</span>
-														)}
-												</CardContent>
-											</Card>
-										))
+										chatHistory.map((chat, index) => {
+											const htmlContent =
+												extractHtmlCodeBlock(
+													chat.content
+												);
+
+											return (
+												<Card
+													key={index}
+													className={`relative group ${chat.role === "user" ? "bg-muted" : ""}`}
+												>
+													<CardHeader className="py-2">
+														<CardTitle className="text-sm">
+															{chat.role ===
+															"user"
+																? "あなた"
+																: chat.role ===
+																	  "assistant"
+																	? selectedAgent?.name ||
+																		"AI"
+																	: "システム"}
+														</CardTitle>
+													</CardHeader>
+													<CardContent className="py-2 prose dark:prose-invert max-w-none">
+														<ReactMarkdown
+															remarkPlugins={[
+																remarkGfm,
+															]}
+															components={{
+																// aタグのレンダリングをカスタマイズ
+																a: ({
+																	node,
+																	...props
+																}) => (
+																	<a
+																		{...props}
+																		onClick={
+																			handleLinkClick
+																		}
+																		target="_blank"
+																		rel="noopener noreferrer"
+																	/>
+																),
+															}}
+														>
+															{chat.content}
+														</ReactMarkdown>
+														{isLoading &&
+															index ===
+																chatHistory.length -
+																	1 &&
+															chat.role ===
+																"assistant" && (
+																<span className="animate-pulse">
+																	▌
+																</span>
+															)}
+													</CardContent>
+
+													{htmlContent && (
+														<Button
+															variant="ghost"
+															size="icon"
+															className="absolute bottom-1 right-1 h-7 w-7 opacity-50 group-hover:opacity-100 focus:opacity-100"
+															title="プレビュー表示"
+															onClick={() => {
+																console.log(
+																	"プレビューボタンクリック: HTMLをセットしてArtifactを開く"
+																);
+																setArtifactContent(
+																	htmlContent
+																);
+																setIsArtifactOpen(
+																	true
+																);
+															}}
+														>
+															<LayoutGrid className="h-4 w-4" />
+														</Button>
+													)}
+												</Card>
+											);
+										})
 									)}
 									<div ref={messagesEndRef}></div>
 								</div>

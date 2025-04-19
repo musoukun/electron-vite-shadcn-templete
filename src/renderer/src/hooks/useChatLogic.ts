@@ -1,18 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Agent, Thread, ChatMessage } from "@/types/chat";
-import { generateUserId, formatMessage } from "@/utils/chat-utils";
-
-// ヘルパー関数: useChatLogic の前に配置
-function isHtmlContent(content: string): boolean {
-	if (!content) return false;
-	const trimmedContent = content.trim();
-	// 簡単なチェック: HTMLタグで始まるか、<html>, <body>タグを含むか
-	return (
-		(trimmedContent.startsWith("<") && trimmedContent.endsWith(">")) ||
-		trimmedContent.includes("<html") ||
-		trimmedContent.includes("<body")
-	);
-}
+import {
+	generateUserId,
+	formatMessage,
+	extractHtmlCodeBlock,
+} from "@/utils/chat-utils";
 
 export function useChatLogic() {
 	// フック内の isHtmlContent 定義は削除
@@ -158,19 +150,17 @@ export function useChatLogic() {
 			}
 		}
 
-		// Artifactビューのロジック
+		// Artifactビューのロジック: HTML検出のみ行う (自動オープンはしない)
 		const lastMessage = chatHistory[chatHistory.length - 1];
 		if (
 			lastMessage &&
 			lastMessage.role === "assistant" &&
 			lastMessage.content
 		) {
-			if (isHtmlContent(lastMessage.content)) {
-				console.log(
-					"HTMLコンテンツを検出しました。Artifactビューを開きます。"
-				);
-				setArtifactContent(lastMessage.content);
-				setIsArtifactOpen(true);
+			const htmlContent = extractHtmlCodeBlock(lastMessage.content);
+			if (htmlContent) {
+				console.log("HTMLコードブロックを検出しました。");
+				// 自動オープンはしない
 			}
 		}
 	}, [
@@ -180,8 +170,6 @@ export function useChatLogic() {
 		threads,
 		userId,
 		loadThreads,
-		setArtifactContent,
-		setIsArtifactOpen,
 	]);
 
 	// 利用可能なエージェントを読み込む
@@ -704,7 +692,7 @@ export function useChatLogic() {
 				userId
 			);
 
-			// ストリーミング完了後、タイトル更新とArtifactビューのチェック
+			// ストリーミング完了後
 			await handleStreamComplete();
 		} catch (error: any) {
 			console.error("Error in sendMessage:", error);
@@ -727,10 +715,8 @@ export function useChatLogic() {
 				return newHistory;
 			});
 
-			// フォールバック処理を試す
+			// フォールバック処理
 			try {
-				console.log("Trying fallback non-streaming API call...");
-				// 非ストリーミングAPIを使用してメッセージを送信
 				if (window.mastraAPI.sendMessageToAgent) {
 					const response = await window.mastraAPI.sendMessageToAgent(
 						agentId,
@@ -777,13 +763,14 @@ export function useChatLogic() {
 						console.log("Fallback API call succeeded");
 						setStreamError(null);
 
-						// フォールバックでも成功した場合、タイトル更新とArtifactビューのチェック
-						if (isHtmlContent(responseContent)) {
+						// フォールバックでのHTMLチェック: 自動オープンはしない
+						const htmlContent =
+							extractHtmlCodeBlock(responseContent);
+						if (htmlContent) {
 							console.log(
-								"HTMLコンテンツを検出しました (Fallback)。Artifactビューを開きます。"
+								"HTMLコードブロックを検出しました (Fallback)。"
 							);
-							setArtifactContent(responseContent);
-							setIsArtifactOpen(true);
+							// 自動オープンはしない
 						}
 					}
 				}
@@ -805,8 +792,6 @@ export function useChatLogic() {
 		handleChunk,
 		userId,
 		handleStreamComplete,
-		setArtifactContent,
-		setIsArtifactOpen,
 	]);
 
 	// マウント時にAPIの存在チェックとエージェント読み込みを行う

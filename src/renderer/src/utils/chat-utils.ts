@@ -119,3 +119,31 @@ export function formatMessage(message: any): ChatMessage | null {
 		createdAt: message.createdAt || message.timestamp,
 	};
 }
+
+// 新しいヘルパー関数: 文字列から ```html ... ``` ブロックの内容を抽出
+export function extractHtmlCodeBlock(content: string): string | null {
+	if (!content) return null;
+	// 正規表現で ```html ... ``` または ``` ... ``` ブロックを検索
+	// ```html または ``` で始まり、改行を挟んでコードがあり、```で終わるパターン
+	// グループ1にコードブロックの内容をキャプチャ
+	const match = content.match(
+		/(?:```html(?:\r\n|\n)|```)(?:\r\n|\n)?([\s\S]*?)(?:\r\n|\n)?```/
+	);
+	if (match && match[1]) {
+		return match[1].trim(); // 前後の空白を除去して返す
+	}
+	// ```で囲まれていない場合でも、HTMLタグで始まっているかチェック（簡易的なフォールバック）
+	const trimmedContent = content.trim();
+	if (trimmedContent.startsWith("<") && trimmedContent.includes(">")) {
+		// 簡単なチェックとして、<html> や <body> タグが含まれているか
+		if (
+			trimmedContent.includes("<html") ||
+			trimmedContent.includes("<body")
+		) {
+			// この場合、メッセージ全体がHTMLの可能性があるが、マークダウン内のコードブロックと区別が難しいため注意
+			// return trimmedContent; // 必要であれば有効化するが、誤検出の可能性あり
+		}
+	}
+
+	return null; // マッチしない場合はnullを返す
+}
