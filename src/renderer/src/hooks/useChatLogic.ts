@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Agent, Thread, ChatMessage } from "@/types/chat";
 import { generateUserId, formatMessage } from "@/utils/chat-utils";
+import { ArtifactType } from "@/types/artifact";
 
 export function useChatLogic() {
 	// 状態管理
@@ -15,6 +16,9 @@ export function useChatLogic() {
 	const [threads, setThreads] = useState<Thread[]>([]);
 	const [isThreadsLoading, setIsThreadsLoading] = useState(false);
 	const [isAgentSelectionOpen, setIsAgentSelectionOpen] = useState(false);
+	const [isArtifactOpen, setIsArtifactOpen] = useState(false);
+	const [artifactContent, setArtifactContent] = useState<string | null>(null);
+	const [artifactType, setArtifactType] = useState<ArtifactType | null>(null);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
 
 	// ユーザーID
@@ -837,5 +841,11 @@ export function useChatLogic() {
 		sendMessage,
 		selectThread,
 		handleDeleteThread,
+		isArtifactOpen,
+		setIsArtifactOpen,
+		artifactContent,
+		setArtifactContent,
+		artifactType,
+		setArtifactType,
 	};
 }
