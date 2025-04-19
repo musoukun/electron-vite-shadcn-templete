@@ -77,7 +77,7 @@ export const ArtifactViewer: React.FC<ArtifactViewerProps> = ({
 
 		contentToRender = removeLeadingMarkdownFence(contentToRender);
 		contentToRender = removeTrailingCodeFence(contentToRender);
-		console.log("末尾の```を削除しました");
+		console.log("末尾の```を削除しました", contentToRender);
 
 		switch (artifact.type) {
 			case "code":

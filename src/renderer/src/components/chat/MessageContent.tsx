@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { highlight } from "sugar-high";
+import { highlight } from "remark-sugar-high";
 
 interface MessageContentProps {
 	message: ChatMessage;
@@ -20,169 +20,180 @@ export const MessageContent: React.FC<MessageContentProps> = ({
 	message,
 	handleLinkClick,
 }) => {
-	// コンテンツの前処理（コードブロック認識を改善）
-	const processContent = (content: string): string => {
+	// contentから先頭の ```markdown を削除する関数
+	const removeLeadingMarkdownFence = (content: string) => {
 		if (!content) return "";
 
-		// ArtifactViewerと同様の処理を実装
-		let processed = content;
+		// 先頭に出現する```markdownの位置を取得
+		const firstFenceIndex = content.indexOf("```markdown");
 
-		// 先頭の```markdownを削除
-		const firstFenceIndex = processed.indexOf("```markdown");
-		if (firstFenceIndex !== -1) {
-			const fenceEnd = processed.indexOf("\n", firstFenceIndex);
-			if (fenceEnd !== -1) {
-				processed =
-					processed.substring(0, firstFenceIndex) +
-					processed.substring(fenceEnd + 1);
-			}
-		}
+		if (firstFenceIndex === -1) return content; // ```markdownが見つからない場合
 
-		// コードブロックの修正
-		processed = processed.replace(/```(\w+)(?!\n)/g, "```$1\n");
+		// ```markdownの長さを計算（改行まで含める）
+		const fenceEnd = content.indexOf("\n", firstFenceIndex);
+		const fenceLength = fenceEnd - firstFenceIndex + 1; // 改行文字も含める
 
-		// 残っているコードブロックが閉じられているか確認
-		const fenceMatches = processed.match(/```/g) || [];
-		if (fenceMatches.length % 2 !== 0) {
-			processed += "\n```";
-		}
-
-		return processed;
-	};
-
-	// コードブロック用のコンポーネント
-	const MarkdownComponents = {
-		// リンクの処理
-		a: ({ node, ...props }: any) => (
-			<a
-				{...props}
-				onClick={handleLinkClick}
-				target="_blank"
-				rel="noopener noreferrer"
-			/>
-		),
-		// 画像の処理
-		img: ({ node, ...props }: any) => (
-			<img
-				{...props}
-				className="max-w-full rounded-md my-2"
-				alt={props.alt || "画像"}
-			/>
-		),
-		// コードブロックの処理をカスタマイズ
-		code: ({ node, inline, className, children, ...props }: any) => {
-			const match = /language-(\w+)/.exec(className || "");
-			const lang = match && match[1] ? match[1].toLowerCase() : "";
-
-			// 文字列処理
-			let content = "";
-			if (Array.isArray(children)) {
-				content = children
-					.map((child) => (typeof child === "string" ? child : ""))
-					.join("");
-			} else {
-				content = String(children).replace(/\n$/, "");
-			}
-
-			// インラインコードの場合
-			if (inline) {
-				return (
-					<code
-						className={`${className || ""} bg-muted/80 text-muted-foreground px-1 rounded-sm text-sm`}
-						{...props}
-					>
-						{content}
-					</code>
-				);
-			}
-
-			// コードブロックの言語が空の場合、内容から推測
-			if (!lang) {
-				if (
-					content.includes("function") ||
-					content.includes("var ") ||
-					content.includes("const ")
-				) {
-					// JavaScriptっぽい
-					const langToUse = "js";
-					try {
-						return createCodeBlock(content, langToUse);
-					} catch (error) {
-						// 失敗したら通常のコードブロックで表示
-						return createCodeBlock(content);
-					}
-				}
-			}
-
-			// 言語が指定されたコードブロックの場合
-			try {
-				return createCodeBlock(content, lang);
-			} catch (error) {
-				// ハイライトに失敗した場合は通常のコードブロックとして表示
-				return createCodeBlock(content);
-			}
-		},
-	};
-
-	// コードブロック生成のヘルパー関数
-	const createCodeBlock = (content: string, lang?: string) => {
-		// コンテンツが空の場合の対応
-		if (!content.trim()) {
-			return (
-				<pre className="rounded-md p-4 overflow-x-auto w-full whitespace-pre-wrap break-words bg-muted/50 border border-border">
-					<code className="text-muted-foreground">
-						(空のコードブロック)
-					</code>
-				</pre>
-			);
-		}
-
-		let highlighted = content;
-		try {
-			if (lang) {
-				highlighted = highlight(content);
-			}
-		} catch (e) {
-			console.error("ハイライト処理に失敗:", e);
-			// エラー時は元のコンテンツを使用
-		}
-
+		// 先頭のフェンスを削除
 		return (
-			<div className="relative code-block-wrapper w-full my-4 not-prose">
-				{lang && (
-					<div className="absolute top-2 right-2 text-xs text-muted-foreground bg-muted px-2 py-1 rounded z-10">
-						{lang}
-					</div>
-				)}
-				<pre className="rounded-md p-4 overflow-x-auto w-full whitespace-pre-wrap break-words bg-muted/50 border border-border">
-					<code
-						className={`language-${lang || "text"}`}
-						dangerouslySetInnerHTML={{
-							__html: highlighted,
-						}}
-					/>
-				</pre>
-			</div>
+			content.substring(0, firstFenceIndex) +
+			content.substring(firstFenceIndex + fenceLength)
 		);
 	};
 
-	const processedContent = processContent(message.content);
+	// contentから末尾の```だけを削除する関数
+	const removeTrailingCodeFence = (content: string) => {
+		if (!content) return "";
 
-	console.log("Processed Content:", processedContent);
+		// 最後に出現する```の位置を取得
+		const lastFenceIndex = content.lastIndexOf("```");
+
+		// ```が見つからない場合はそのまま返す
+		if (lastFenceIndex === -1) return content;
+
+		// 最後の```を削除したコンテンツを返す
+		return (
+			content.substring(0, lastFenceIndex) +
+			content.substring(lastFenceIndex + 3)
+		);
+	};
+
+	// コードブロックを検出して直接処理する
+	const processCodeBlocks = (content: string) => {
+		// コードブロックのパターン: ```language\ncode```
+		const regex = /```([a-zA-Z0-9]+)?\n([\s\S]*?)```/g;
+		let match;
+		let result = content;
+		const blocks = [];
+
+		// すべてのコードブロックを見つける
+		while ((match = regex.exec(content)) !== null) {
+			const language = match[1] || "";
+			const code = match[2];
+			const fullMatch = match[0];
+			const startIndex = match.index;
+			const endIndex = startIndex + fullMatch.length;
+
+			blocks.push({
+				language,
+				code,
+				startIndex,
+				endIndex,
+				fullMatch,
+			});
+		}
+
+		return blocks;
+	};
+
+	console.log(
+		"Rendering Markdown for message:",
+		message.id,
+		"\nContent:\n",
+		message.content
+	);
+
+	// マークダウンフェンスの除去処理を適用
+	let processedContent = message.content || "";
+	processedContent = removeLeadingMarkdownFence(processedContent);
+	processedContent = removeTrailingCodeFence(processedContent);
+
+	// コードブロックの抽出
+	const codeBlocks = processCodeBlocks(processedContent);
+	console.log("検出されたコードブロック:", codeBlocks.length);
+
 	return (
 		<ScrollArea className="w-full h-full">
 			<div className="prose dark:prose-invert max-w-none prose-notion p-4">
 				<ReactMarkdown
-					remarkPlugins={[remarkGfm, remarkMath]}
+					remarkPlugins={[remarkGfm, remarkMath, highlight]}
 					rehypePlugins={[rehypeKatex]}
-					components={MarkdownComponents}
+					components={{
+						a: (props: any) => (
+							<a
+								{...props}
+								onClick={handleLinkClick}
+								target="_blank"
+								rel="noopener noreferrer"
+							/>
+						),
+						code: ({
+							node,
+							inline,
+							className,
+							children,
+							...props
+						}: any) => {
+							const match = /language-(\w+)/.exec(
+								className || ""
+							);
+							const lang =
+								match && match[1] ? match[1].toLowerCase() : "";
+
+							if (inline) {
+								return (
+									<code
+										className="bg-muted px-1 rounded text-sm"
+										{...props}
+									>
+										{children}
+									</code>
+								);
+							}
+
+							// コードブロック表示用の特別な処理
+							return (
+								<div className="relative my-4 w-full">
+									{lang && (
+										<div className="absolute top-2 right-2 text-xs bg-muted px-2 py-1 rounded z-10">
+											{lang}
+										</div>
+									)}
+									<pre className="rounded-md p-4 overflow-x-auto w-full bg-muted/50 border-border border">
+										<code
+											className={
+												lang ? `language-${lang}` : ""
+											}
+											{...props}
+										>
+											{children}
+										</code>
+									</pre>
+								</div>
+							);
+						},
+						pre: ({ children, ...props }: any) => {
+							return (
+								<div className="w-full overflow-auto">
+									<pre {...props}>{children}</pre>
+								</div>
+							);
+						},
+					}}
 				>
-					{processedContent || ""}
+					{processedContent}
 				</ReactMarkdown>
 
 				{/* ローディングインジケーター用のプレースホルダー */}
 				{message.role === "assistant" && message.content === "" && (
 					<span className="animate-pulse">▌</span>
+				)}
+
+				{/* 検出したコードブロックを表示（デバッグ用） */}
+				{false && codeBlocks.length > 0 && (
+					<div className="mt-4 border-t pt-4">
+						<h4>
+							デバッグ情報: 検出されたコードブロック (
+							{codeBlocks.length})
+						</h4>
+						{codeBlocks.map((block, i) => (
+							<div key={i} className="mt-2 p-2 border rounded">
+								<div>言語: {block.language || "なし"}</div>
+								<pre className="text-xs mt-1 p-2 bg-muted">
+									{block.code}
+								</pre>
+							</div>
+						))}
+					</div>
 				)}
 			</div>
 		</ScrollArea>
