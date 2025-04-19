@@ -1,14 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Agent, Thread, ChatMessage } from "@/types/chat";
-import {
-	generateUserId,
-	formatMessage,
-	extractHtmlCodeBlock,
-} from "@/utils/chat-utils";
+import { generateUserId, formatMessage } from "@/utils/chat-utils";
 
 export function useChatLogic() {
-	// フック内の isHtmlContent 定義は削除
-
 	// 状態管理
 	const [message, setMessage] = useState("");
 	const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -22,8 +16,6 @@ export function useChatLogic() {
 	const [isThreadsLoading, setIsThreadsLoading] = useState(false);
 	const [isAgentSelectionOpen, setIsAgentSelectionOpen] = useState(false);
 	const messagesEndRef = useRef<HTMLDivElement>(null);
-	const [isArtifactOpen, setIsArtifactOpen] = useState(false);
-	const [artifactContent, setArtifactContent] = useState<string | null>(null);
 
 	// ユーザーID
 	const userId = generateUserId();
@@ -147,20 +139,6 @@ export function useChatLogic() {
 				console.log(
 					`スレッド ${currentThreadId} のタイトルは既に設定済みか、スレッドが見つかりません。タイトル更新はスキップします。`
 				);
-			}
-		}
-
-		// Artifactビューのロジック: HTML検出のみ行う (自動オープンはしない)
-		const lastMessage = chatHistory[chatHistory.length - 1];
-		if (
-			lastMessage &&
-			lastMessage.role === "assistant" &&
-			lastMessage.content
-		) {
-			const htmlContent = extractHtmlCodeBlock(lastMessage.content);
-			if (htmlContent) {
-				console.log("HTMLコードブロックを検出しました。");
-				// 自動オープンはしない
 			}
 		}
 	}, [
@@ -762,16 +740,6 @@ export function useChatLogic() {
 
 						console.log("Fallback API call succeeded");
 						setStreamError(null);
-
-						// フォールバックでのHTMLチェック: 自動オープンはしない
-						const htmlContent =
-							extractHtmlCodeBlock(responseContent);
-						if (htmlContent) {
-							console.log(
-								"HTMLコードブロックを検出しました (Fallback)。"
-							);
-							// 自動オープンはしない
-						}
 					}
 				}
 			} catch (fallbackError) {
@@ -834,9 +802,7 @@ export function useChatLogic() {
 		// アプリ起動時にエージェント一覧のみを読み込む
 		console.log("mastraAPI is available, loading agents...");
 		loadAgents();
-
-		// loadAllThreads(); // 起動時の全スレッド読み込みは削除
-	}, [loadAgents]); // 依存配列から loadAllThreads を削除
+	}, [loadAgents]);
 
 	return {
 		message,
@@ -871,9 +837,5 @@ export function useChatLogic() {
 		sendMessage,
 		selectThread,
 		handleDeleteThread,
-		isArtifactOpen,
-		setIsArtifactOpen,
-		artifactContent,
-		setArtifactContent,
 	};
 }

@@ -448,7 +448,7 @@ ipcMain.handle(
 			// スレッドのタイトルを更新
 			const updatedThread = await thread.update({
 				title: title,
-				resourceid: resourceId || "default",
+				resourceId: resourceId || "default",
 				metadata: {}, // 空のメタデータを追加
 			});
 

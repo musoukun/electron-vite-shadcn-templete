@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -10,8 +10,9 @@ import {
 	MessageSquare,
 	MoreHorizontal,
 	Trash2,
-	X,
-	LayoutGrid,
+	Code,
+	FileText,
+	Layout,
 } from "lucide-react";
 import {
 	Sidebar,
@@ -35,12 +36,6 @@ import {
 	ResizablePanel,
 	ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import { ChatSidebar } from "@/components/chat/ChatSidebar";
-import { ChatArea } from "@/components/chat/ChatArea";
-import { AgentSelectionDialog } from "@/components/chat/AgentSelectionDialog";
-import { ArtifactView } from "@/components/chat/ArtifactView";
-import { useChatLogic } from "@/hooks/useChatLogic";
-import { Agent, Thread, ChatMessage } from "@/types/chat";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
@@ -49,7 +44,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { extractHtmlCodeBlock } from "@/utils/chat-utils";
+import { useChatLogic } from "@/hooks/useChatLogic";
+import { Agent, Thread, ChatMessage } from "@/types/chat";
+import { ArtifactProvider, useArtifacts } from "@/contexts/ArtifactContext";
+import { ArtifactPanel } from "@/components/artifacts/ArtifactPanel";
+import { ArtifactList } from "@/components/artifacts/ArtifactList";
+import {
+	extractAllCodeBlocks,
+	inferArtifactType,
+} from "@/utils/artifact-utils";
 
 // グローバルスコープに関数を公開するための型定義 (Preloadで公開したAPI)
 declare global {
@@ -135,7 +138,7 @@ function CustomAgentSelectionDialog({
 	);
 }
 
-function App() {
+function AppContent() {
 	// useChatLogicからすべての必要な関数と状態を取得
 	const {
 		message,
@@ -160,11 +163,18 @@ function App() {
 		sendMessage,
 		selectThread,
 		handleDeleteThread,
-		isArtifactOpen,
-		setIsArtifactOpen,
-		artifactContent,
-		setArtifactContent,
 	} = useChatLogic();
+
+	// アーティファクト関連の状態と関数
+	const {
+		artifacts,
+		activeArtifact,
+		isOpen,
+		setIsOpen,
+		addArtifact,
+		setActiveArtifact,
+		removeArtifact,
+	} = useArtifacts();
 
 	// メッセージが追加されたら自動スクロール
 	useEffect(() => {
@@ -172,6 +182,36 @@ function App() {
 			messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
 		}
 	}, [chatHistory]);
+
+	// チャット履歴に新しいメッセージが追加されたときに、コードブロックがあれば自動的にArtifactとして抽出
+	useEffect(() => {
+		if (chatHistory.length === 0) return;
+
+		// 最後のメッセージを取得
+		const lastMessage = chatHistory[chatHistory.length - 1];
+
+		// AIのメッセージからコードブロックを抽出
+		if (lastMessage && lastMessage.role === "assistant" && !isLoading) {
+			const codeBlocks = extractAllCodeBlocks(lastMessage.content);
+
+			// コードブロックが見つかれば、Artifactとして追加
+			if (codeBlocks.length > 0) {
+				codeBlocks.forEach((block, index) => {
+					const language = block.language || "text";
+					const type = inferArtifactType(language);
+					const title = `${selectedAgent?.name || "AI"}のコード ${index + 1} (${language})`;
+
+					// アーティファクトとして追加
+					addArtifact({
+						type,
+						title,
+						content: block.content,
+						language,
+					});
+				});
+			}
+		}
+	}, [chatHistory, isLoading, addArtifact, selectedAgent]);
 
 	// エージェント選択状態に戻す関数
 	const handleBackToAgentSelection = () => {
@@ -210,22 +250,39 @@ function App() {
 		// http/https以外のリンクはデフォルトの動作（もしあれば）
 	};
 
+	// Artifactを追加する関数
+	const handleExtractCode = (content: string, title?: string) => {
+		const codeBlock = extractAllCodeBlocks(content)[0];
+		if (codeBlock) {
+			const language = codeBlock.language || "text";
+			const type = inferArtifactType(language);
+			addArtifact({
+				type,
+				title: title || `コードスニペット (${language})`,
+				content: codeBlock.content,
+				language,
+			});
+		}
+	};
+
 	return (
 		<SidebarProvider>
 			<div className="flex h-screen w-full">
-				<Sidebar className="w-64 border-r shrink-0">
+				<Sidebar className="w-72 border-r shrink-0">
 					{/* サイドバーヘッダー */}
 					<SidebarHeader className="p-4 border-b">
 						<h2 className="text-lg font-semibold">
-							{selectedAgent ? "会話履歴" : "エージェント選択"}
+							{selectedAgent
+								? "会話履歴 / Artifacts"
+								: "エージェント選択"}
 						</h2>
 					</SidebarHeader>
 
 					{/* サイドバーコンテンツ */}
-					<SidebarContent className="flex-1 overflow-auto p-2">
+					<SidebarContent className="flex-1 overflow-hidden p-0">
 						{!selectedAgent ? (
 							// エージェント選択モード
-							<div className="space-y-1">
+							<div className="space-y-1 p-2">
 								{isAgentsLoading ? (
 									<div className="text-center p-4 text-sm text-muted-foreground">
 										エージェント読み込み中...
@@ -251,103 +308,149 @@ function App() {
 								)}
 							</div>
 						) : (
-							// 会話モード
-							<>
-								{/* エージェント選択ボタン */}
-								<Button
-									variant="outline"
-									className="w-full justify-start mb-2"
-									onClick={handleBackToAgentSelection}
-								>
-									<User className="mr-2 h-4 w-4" />
-									<span>他のエージェントを選択</span>
-								</Button>
+							// 会話モード: タブで会話履歴とArtifactsを切り替え
+							<div className="flex flex-col h-full">
+								<div className="border-b flex">
+									<Button
+										variant="ghost"
+										className="flex-1 rounded-none py-2"
+										onClick={() => setIsOpen(false)}
+									>
+										<MessageSquare className="mr-2 h-4 w-4" />
+										会話履歴
+									</Button>
+									<Button
+										variant="ghost"
+										className="flex-1 rounded-none py-2"
+										onClick={() => setIsOpen(true)}
+									>
+										<Code className="mr-2 h-4 w-4" />
+										Artifacts
+									</Button>
+								</div>
 
-								{/* 新規チャットボタン */}
-								<Button
-									variant="default"
-									className="w-full justify-start mb-2"
-									onClick={startNewChat}
-								>
-									<Plus className="mr-2 h-4 w-4" />
-									<span>新しい会話</span>
-								</Button>
-
-								{/* スレッド一覧 */}
-								{isThreadsLoading ? (
-									<div className="text-center p-4 text-sm text-muted-foreground">
-										読み込み中...
-									</div>
-								) : threads.length > 0 ? (
-									<div className="space-y-1">
-										{threads.map((thread) => (
-											<div
-												key={thread.id}
-												className="relative group"
+								<div className="flex-1 overflow-auto">
+									{!isOpen ? (
+										// 会話履歴表示
+										<div className="p-2 h-full flex flex-col">
+											{/* エージェント選択ボタン */}
+											<Button
+												variant="outline"
+												className="w-full justify-start mb-2"
+												onClick={
+													handleBackToAgentSelection
+												}
 											>
-												<Button
-													variant={
-														currentThreadId ===
-														thread.id
-															? "secondary"
-															: "ghost"
-													}
-													className="w-full justify-start text-sm pr-8"
-													onClick={() =>
-														selectThread(thread.id)
-													}
-												>
-													<MessageSquare className="mr-2 h-4 w-4" />
-													<div className="flex flex-col items-start overflow-hidden w-full">
-														<span className="truncate w-full">
-															{thread.title ||
-																"無題の会話"}
-														</span>
-														{thread.agentName && (
-															<span className="text-xs text-muted-foreground truncate w-full">
-																{
-																	thread.agentName
-																}
-															</span>
-														)}
-													</div>
-												</Button>
-												<DropdownMenu>
-													<DropdownMenuTrigger
-														asChild
-													>
-														<Button
-															variant="ghost"
-															size="icon"
-															className="absolute top-1/2 right-1 transform -translate-y-1/2 h-6 w-6 opacity-0 group-hover:opacity-100 focus:opacity-100"
+												<User className="mr-2 h-4 w-4" />
+												<span>
+													他のエージェントを選択
+												</span>
+											</Button>
+
+											{/* 新規チャットボタン */}
+											<Button
+												variant="default"
+												className="w-full justify-start mb-2"
+												onClick={startNewChat}
+											>
+												<Plus className="mr-2 h-4 w-4" />
+												<span>新しい会話</span>
+											</Button>
+
+											{/* スレッド一覧 */}
+											{isThreadsLoading ? (
+												<div className="text-center p-4 text-sm text-muted-foreground">
+													読み込み中...
+												</div>
+											) : threads.length > 0 ? (
+												<div className="space-y-1">
+													{threads.map((thread) => (
+														<div
+															key={thread.id}
+															className="relative group"
 														>
-															<MoreHorizontal className="h-4 w-4" />
-														</Button>
-													</DropdownMenuTrigger>
-													<DropdownMenuContent align="end">
-														<DropdownMenuItem
-															onClick={(e) => {
-																e.stopPropagation();
-																handleDeleteThread(
+															<Button
+																variant={
+																	currentThreadId ===
 																	thread.id
-																);
-															}}
-															className="text-red-600"
-														>
-															<Trash2 className="mr-2 h-4 w-4" />
-															削除
-														</DropdownMenuItem>
-													</DropdownMenuContent>
-												</DropdownMenu>
-											</div>
-										))}
-									</div>
-								) : (
-									<div className="text-center p-4 text-sm text-muted-foreground">
-										会話履歴がありません
-									</div>
-								)}
-							</>
+																		? "secondary"
+																		: "ghost"
+																}
+																className="w-full justify-start text-sm pr-8"
+																onClick={() =>
+																	selectThread(
+																		thread.id
+																	)
+																}
+															>
+																<MessageSquare className="mr-2 h-4 w-4" />
+																<div className="flex flex-col items-start overflow-hidden w-full">
+																	<span className="truncate w-full">
+																		{thread.title ||
+																			"無題の会話"}
+																	</span>
+																	{thread.agentName && (
+																		<span className="text-xs text-muted-foreground truncate w-full">
+																			{
+																				thread.agentName
+																			}
+																		</span>
+																	)}
+																</div>
+															</Button>
+															<DropdownMenu>
+																<DropdownMenuTrigger
+																	asChild
+																>
+																	<Button
+																		variant="ghost"
+																		size="icon"
+																		className="absolute top-1/2 right-1 transform -translate-y-1/2 h-6 w-6 opacity-0 group-hover:opacity-100 focus:opacity-100"
+																	>
+																		<MoreHorizontal className="h-4 w-4" />
+																	</Button>
+																</DropdownMenuTrigger>
+																<DropdownMenuContent align="end">
+																	<DropdownMenuItem
+																		onClick={(
+																			e
+																		) => {
+																			e.stopPropagation();
+																			handleDeleteThread(
+																				thread.id
+																			);
+																		}}
+																		className="text-red-600"
+																	>
+																		<Trash2 className="mr-2 h-4 w-4" />
+																		削除
+																	</DropdownMenuItem>
+																</DropdownMenuContent>
+															</DropdownMenu>
+														</div>
+													))}
+												</div>
+											) : (
+												<div className="text-center p-4 text-sm text-muted-foreground">
+													会話履歴がありません
+												</div>
+											)}
+										</div>
+									) : (
+										// Artifacts表示
+										<div className="h-full">
+											<ArtifactList
+												artifacts={artifacts}
+												activeArtifactId={
+													activeArtifact?.id || null
+												}
+												onSelect={setActiveArtifact}
+												onDelete={removeArtifact}
+											/>
+										</div>
+									)}
+								</div>
+							</div>
 						)}
 					</SidebarContent>
 
@@ -378,7 +481,7 @@ function App() {
 
 				<ResizablePanelGroup direction="horizontal" className="flex-1">
 					<ResizablePanel
-						defaultSize={isArtifactOpen ? 50 : 100}
+						defaultSize={isOpen && activeArtifact ? 50 : 100}
 						minSize={30}
 					>
 						<div className="flex-1 flex flex-col w-full h-full overflow-hidden">
@@ -412,10 +515,10 @@ function App() {
 										</div>
 									) : (
 										chatHistory.map((chat, index) => {
-											const htmlContent =
-												extractHtmlCodeBlock(
+											const hasCodeBlock =
+												extractAllCodeBlocks(
 													chat.content
-												);
+												).length > 0;
 
 											return (
 												<Card
@@ -470,25 +573,21 @@ function App() {
 															)}
 													</CardContent>
 
-													{htmlContent && (
+													{hasCodeBlock && (
 														<Button
 															variant="ghost"
 															size="icon"
 															className="absolute bottom-1 right-1 h-7 w-7 opacity-50 group-hover:opacity-100 focus:opacity-100"
-															title="プレビュー表示"
+															title="コードをArtifactに追加"
 															onClick={() => {
-																console.log(
-																	"プレビューボタンクリック: HTMLをセットしてArtifactを開く"
+																handleExtractCode(
+																	chat.content,
+																	`${selectedAgent?.name || "AI"}のコード`
 																);
-																setArtifactContent(
-																	htmlContent
-																);
-																setIsArtifactOpen(
-																	true
-																);
+																setIsOpen(true);
 															}}
 														>
-															<LayoutGrid className="h-4 w-4" />
+															<Layout className="h-4 w-4" />
 														</Button>
 													)}
 												</Card>
@@ -546,17 +645,12 @@ function App() {
 						</div>
 					</ResizablePanel>
 
-					{isArtifactOpen && (
-						<>
-							<ResizableHandle withHandle />
-							<ResizablePanel defaultSize={50} minSize={20}>
-								<ArtifactView
-									isOpen={isArtifactOpen}
-									content={artifactContent}
-									onClose={() => setIsArtifactOpen(false)}
-								/>
-							</ResizablePanel>
-						</>
+					{isOpen && activeArtifact && (
+						<ArtifactPanel
+							artifact={activeArtifact}
+							isOpen={isOpen && !!activeArtifact}
+							onClose={() => setActiveArtifact(null)}
+						/>
 					)}
 				</ResizablePanelGroup>
 			</div>
@@ -568,7 +662,17 @@ function App() {
 				agents={agents}
 				isLoading={isAgentsLoading}
 			/>
+
+			<Toaster />
 		</SidebarProvider>
+	);
+}
+
+function App() {
+	return (
+		<ArtifactProvider>
+			<AppContent />
+		</ArtifactProvider>
 	);
 }
 
