@@ -1,0 +1,101 @@
+/* Suger Highのシンタックスハイライト用スタイル */
+.syntax-highlighted .sh__comment {
+	color: #888888;
+	font-style: italic;
+}
+
+.syntax-highlighted .sh__string {
+	color: #22c55e;
+}
+
+.syntax-highlighted .sh__number,
+.syntax-highlighted .sh__boolean {
+	color: #f59e0b;
+}
+
+.syntax-highlighted .sh__keyword {
+	color: #ec4899;
+}
+
+.syntax-highlighted .sh__function {
+	color: #3b82f6;
+}
+
+.syntax-highlighted .sh__class-name {
+	color: #a855f7;
+}
+
+.syntax-highlighted .sh__imports {
+	color: #38bdf8;
+}
+
+.syntax-highlighted .sh__property {
+	color: #64748b;
+}
+
+.syntax-highlighted .sh__entity {
+	color: #06b6d4;
+}
+
+/* ダークモード対応 */
+.dark .syntax-highlighted .sh__comment {
+	color: #6b7280;
+}
+
+.dark .syntax-highlighted .sh__string {
+	color: #4ade80;
+}
+
+.dark .syntax-highlighted .sh__number,
+.dark .syntax-highlighted .sh__boolean {
+	color: #fbbf24;
+}
+
+.dark .syntax-highlighted .sh__keyword {
+	color: #f472b6;
+}
+
+.dark .syntax-highlighted .sh__function {
+	color: #60a5fa;
+}
+
+.dark .syntax-highlighted .sh__class-name {
+	color: #c084fc;
+}
+
+.dark .syntax-highlighted .sh__imports {
+	color: #7dd3fc;
+}
+
+.dark .syntax-highlighted .sh__property {
+	color: #94a3b8;
+}
+
+.dark .syntax-highlighted .sh__entity {
+	color: #22d3ee;
+}
+
+/* コードブロックのスタイル */
+pre {
+	margin: 1em 0;
+	padding: 1em;
+	border-radius: 0.375rem;
+	background-color: hsl(var(--muted));
+	overflow-x: auto;
+}
+
+pre code {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+	font-size: 0.9em;
+	line-height: 1.6;
+}
+
+/* インラインコードのスタイル */
+:not(pre)>code {
+	padding: 0.2em 0.4em;
+	margin: 0 0.2em;
+	border-radius: 0.25rem;
+	background-color: hsl(var(--muted));
+	font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+	font-size: 0.9em;
+}

@@ -809,6 +809,7 @@ export function useChatLogic() {
 	}, [loadAgents]);
 
 	return {
+		// 古い命名規則
 		message,
 		setMessage,
 		chatHistory,
@@ -847,5 +848,12 @@ export function useChatLogic() {
 		setArtifactContent,
 		artifactType,
 		setArtifactType,
+
+		// 新しい命名規則のエイリアス
+		input: message,
+		handleInputChange: (e: React.ChangeEvent<HTMLTextAreaElement>) =>
+			setMessage(e.target.value),
+		messages: chatHistory,
+		error: streamError,
 	};
 }
