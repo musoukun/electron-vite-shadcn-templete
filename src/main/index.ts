@@ -368,7 +368,7 @@ ipcMain.handle(
 			const thread = await mastraClient.createMemoryThread({
 				agentId,
 				title: title || "新しい会話",
-				resourceid: resourceId || "default", // 注: APIは小文字のresourceidを使用
+				resourceId: resourceId || "default", // 注: APIは小文字のresourceidを使用
 				metadata: {
 					agentId: agentId,
 					agentName: "AI", // メタデータにエージェント名を設定

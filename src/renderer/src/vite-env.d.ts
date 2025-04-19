@@ -37,7 +37,7 @@ interface MastraAPI {
 	createThread: (
 		agentId: string,
 		title: string,
-		resourceId?: string
+		resourceid?: string
 	) => Promise<Thread>;
 	getThreadMessages: (
 		threadId: string,
