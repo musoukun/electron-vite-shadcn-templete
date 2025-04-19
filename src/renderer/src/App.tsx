@@ -36,12 +36,15 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
+import { highlight } from "sugar-high";
 import { useChatLogic } from "@/hooks/useChatLogic";
 import { ArtifactViewer } from "@/components/artifacts";
 import { extractHtmlBlock, extractMarkdownBlock } from "@/utils/artifact-utils";
 import { ArtifactType } from "@/types/artifact";
 import { CustomAgentSelectionDialog } from "@/components/dialogs";
 import { ChatMessage } from "@/types/chat";
+import { cn } from "@/lib/utils";
+import MessageContent from "@/components/chat/MessageContent";
 
 // グローバルスコープに関数を公開するための型定義 (Preloadで公開したAPI)
 declare global {
@@ -114,199 +117,6 @@ function AppContent() {
 				});
 		}
 		// http/https以外のリンクはデフォルトの動作（もしあれば）
-	};
-
-	// ReactMarkdown 用のカスタムコンポーネント定義
-	const markdownComponents = {
-		// リンクの処理
-		a: ({ node, ...props }: any) => (
-			<a
-				{...props}
-				onClick={handleLinkClick}
-				target="_blank"
-				rel="noopener noreferrer"
-			/>
-		),
-		// コードブロックの処理をカスタマイズ
-		code: ({ node, inline, className, children, ...props }: any) => {
-			const match = /language-(\w+)/.exec(className || "");
-			const lang = match && match[1] ? match[1].toLowerCase() : "";
-
-			// オブジェクトの適切な文字列変換処理
-			// children がReact要素の配列の場合の特別処理
-			let content = "";
-
-			if (Array.isArray(children)) {
-				console.log(
-					"【配列検出】React要素の配列を処理します:",
-					children.length,
-					"個の要素"
-				);
-
-				// 要素の配列を適切に処理
-				try {
-					// React要素から実際のテキスト内容を抽出
-					content = children
-						.map((child) => {
-							// React要素からテキスト抽出を試みる
-							if (typeof child === "string") {
-								return child;
-							} else if (child && typeof child === "object") {
-								// propsからchildren（テキスト）を取得
-								if (child.props && child.props.children) {
-									if (
-										typeof child.props.children === "string"
-									) {
-										return child.props.children;
-									} else if (
-										Array.isArray(child.props.children)
-									) {
-										// さらに再帰的に処理
-										return child.props.children
-											.map((c: any) =>
-												typeof c === "string" ? c : ""
-											)
-											.join("");
-									}
-								}
-								// JSONとしてオブジェクトの構造を表示
-								return JSON.stringify(
-									child,
-									(key, value) => {
-										// Symbol値やReact特殊オブジェクトを文字列化
-										if (typeof value === "symbol")
-											return value.toString();
-										// 循環参照防止
-										if (
-											key === "_owner" ||
-											key === "_store"
-										)
-											return undefined;
-										return value;
-									},
-									2
-								);
-							}
-							return "";
-						})
-						.join("");
-				} catch (e) {
-					console.error("React要素の処理中にエラー:", e);
-					content = String(children);
-				}
-			} else {
-				// 通常の文字列処理
-				content = String(children).replace(/\n$/, "");
-			}
-
-			// [object Object] の問題を修正 - JSON形式でフォーマットして表示
-			if (content.includes("[object Object]")) {
-				try {
-					// 正規表現を使ってすべての [object Object] パターンを探す
-					// そのままの文字列だけでなく、周囲のコンテキストを取得して解析を試みる
-					content = content.replace(
-						/(\{[^{}]*\[object Object\][^{}]*\}|\[object Object\])/g,
-						(match) => {
-							console.log("オブジェクト文字列検出:", match);
-
-							// シンプルな [object Object] だけの場合
-							if (match === "[object Object]") {
-								return "{ 不明なオブジェクト }";
-							}
-
-							// 何らかの構造を持つオブジェクトの場合、可能な限りパース
-							try {
-								// プロパティ名のパターンを探す
-								const propPattern =
-									/(\w+)\s*:\s*\[object Object\]/g;
-								let foundProps = false;
-								const parsedObj = match.replace(
-									propPattern,
-									(propMatch, propName) => {
-										foundProps = true;
-										return `"${propName}": { "type": "オブジェクト" }`;
-									}
-								);
-
-								// プロパティが見つかった場合、整形して表示
-								if (foundProps) {
-									// 整形して見やすくする
-									const formatted = parsedObj
-										.replace(
-											/\[object Object\]/g,
-											'{ "type": "オブジェクト" }'
-										)
-										.replace(/'/g, '"')
-										.replace(/(\w+):/g, '"$1":');
-
-									try {
-										// 可能ならJSONとしてパースして整形
-										const jsonObj = JSON.parse(formatted);
-										return JSON.stringify(jsonObj, null, 2);
-									} catch (e) {
-										// JSONパースに失敗した場合はそのまま返す
-										return formatted;
-									}
-								}
-
-								return "{ 構造不明のオブジェクト }";
-							} catch (e) {
-								console.error(
-									"オブジェクト構造の解析に失敗:",
-									e
-								);
-								return "{ パース不能なオブジェクト }";
-							}
-						}
-					);
-				} catch (e) {
-					console.error("オブジェクト変換エラー:", e);
-				}
-			}
-
-			// 1. 言語が 'markdown' の場合 -> 再度 ReactMarkdown でレンダリング
-			if (lang === "markdown") {
-				return (
-					<div className="nested-markdown-block rounded-lg bg-muted/50 p-4 my-4 border border-muted-foreground/20">
-						<ReactMarkdown
-							remarkPlugins={[remarkGfm, remarkMath]}
-							rehypePlugins={[rehypeKatex]}
-							components={{ a: markdownComponents.a }}
-						>
-							{content.trim() || ""}
-						</ReactMarkdown>
-					</div>
-				);
-			}
-
-			// 2. インラインコードの場合
-			if (inline) {
-				return (
-					<code className={className} {...props}>
-						{content}
-					</code>
-				);
-			}
-
-			// 3. 通常のコードブロックの場合 (markdown 以外 or 言語指定なし)
-			return (
-				<div className="relative code-block-wrapper w-full">
-					{lang && (
-						<div className="absolute top-2 right-2 text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
-							{lang}
-						</div>
-					)}
-					{/* オーバーフロー問題を修正するためのスタイル追加 */}
-					<pre
-						className={`${className || ""} syntax-highlighted rounded-md p-4 my-2 overflow-x-auto w-full whitespace-pre-wrap break-words`}
-					>
-						<code {...props} className={`${className} break-words`}>
-							{content}
-						</code>
-					</pre>
-				</div>
-			);
-		},
 	};
 
 	// メッセージが追加されたら自動スクロール
@@ -610,10 +420,10 @@ function AppContent() {
 												return (
 													<Card
 														key={index}
-														className={`relative group ${chat.role === "user" ? "bg-muted" : ""}`}
+														className={`relative group ${chat.role === "user" ? "bg-muted/50" : ""}`}
 													>
-														<CardHeader className="py-2">
-															<CardTitle className="text-sm">
+														<CardHeader className="py-2 px-4 border-b flex-shrink-0 flex justify-between items-center">
+															<CardTitle className="text-sm font-medium">
 																{chat.role ===
 																"user"
 																	? "あなた"
@@ -624,62 +434,42 @@ function AppContent() {
 																		: "システム"}
 															</CardTitle>
 														</CardHeader>
-														<CardContent className="py-2 prose dark:prose-invert max-w-none whitespace-pre-wrap break-words overflow-x-auto">
-															{/* MarkdownWithNestedCodeBlocks の代わりに ReactMarkdown を直接使用 */}
-															<div className="w-full overflow-hidden break-words">
-																<ReactMarkdown
-																	remarkPlugins={[
-																		remarkGfm,
-																		remarkMath,
-																	]}
-																	rehypePlugins={[
-																		rehypeKatex,
-																	]}
-																	components={
-																		markdownComponents
-																	}
-																>
-																	{chat.content ||
-																		""}
-																</ReactMarkdown>
-															</div>
-															{isLoading &&
-																index ===
-																	messages.length -
-																		1 &&
-																chat.role ===
-																	"assistant" && (
-																	<span className="animate-pulse">
-																		▌
-																	</span>
+														<CardContent className="p-0 flex-1 overflow-hidden relative">
+															{/* 新しいMessageContentコンポーネントを使用 */}
+															<MessageContent
+																message={chat}
+																handleLinkClick={
+																	handleLinkClick
+																}
+															/>
+
+															{/* プレビューボタンをコンテンツ部分の右下に表示 */}
+															{previewContent &&
+																previewType && (
+																	<Button
+																		variant="ghost"
+																		size="icon"
+																		className="absolute bottom-2 right-2 h-7 w-7 opacity-50 group-hover:opacity-100 focus:opacity-100 z-10 bg-background/80"
+																		title={`${previewType === "html" ? "HTML" : "Markdown"} プレビュー表示`}
+																		onClick={() => {
+																			console.log(
+																				`プレビューボタン (${previewType}): コンテンツをセットしてArtifactを開く`
+																			);
+																			setArtifactContent(
+																				previewContent
+																			);
+																			setArtifactType(
+																				previewType
+																			);
+																			setIsArtifactOpen(
+																				true
+																			);
+																		}}
+																	>
+																		<LayoutGrid className="h-4 w-4" />
+																	</Button>
 																)}
 														</CardContent>
-
-														{previewContent &&
-															previewType && (
-																<Button
-																	variant="ghost"
-																	size="icon"
-																	className="absolute bottom-1 right-1 h-7 w-7 opacity-50 group-hover:opacity-100 focus:opacity-100"
-																	title={`${previewType === "html" ? "HTML" : "Markdown"} プレビュー表示`}
-																	onClick={() => {
-																		console.log(
-																			`プレビューボタン (${previewType}): コンテンツをセットしてArtifactを開く`
-																		);
-																		setArtifactContent(
-																			previewContent
-																		);
-																		setArtifactType(
-																			previewType
-																		);
-																		setIsArtifactOpen(
-																			true
-																		);
-																	}}
-																>
-																	<LayoutGrid className="h-4 w-4" />
-																</Button>
-															)}
 													</Card>
 												);
 											}

@@ -8,7 +8,6 @@ import {
 	SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Thread, Agent } from "@/types/chat";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface ChatSidebarProps {
 	threads: Thread[];

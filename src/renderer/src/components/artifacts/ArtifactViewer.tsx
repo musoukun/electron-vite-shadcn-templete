@@ -23,12 +23,62 @@ export const ArtifactViewer: React.FC<ArtifactViewerProps> = ({
 	artifact,
 	onClose,
 }) => {
+	// contentから末尾の```だけを削除する関数
+	const removeTrailingCodeFence = (content: string) => {
+		if (!content) return "";
+
+		// 最後に出現する```の位置を取得
+		const lastFenceIndex = content.lastIndexOf("```");
+
+		// ```が見つからない場合はそのまま返す
+		if (lastFenceIndex === -1) return content;
+
+		// // 最後の```を削除したコンテンツを返す
+		// console.log(
+		// 	content.substring(0, lastFenceIndex) +
+		// 		content.substring(lastFenceIndex + 3)
+		// );
+		return (
+			content.substring(0, lastFenceIndex) +
+			content.substring(lastFenceIndex + 3)
+		);
+	};
+
+	// 先頭の ```markdown を削除する関数
+	const removeLeadingMarkdownFence = (content: string) => {
+		if (!content) return "";
+
+		// 先頭に出現する```markdownの位置を取得
+		const firstFenceIndex = content.indexOf("```markdown");
+
+		if (firstFenceIndex === -1) return content; // ```markdownが見つからない場合
+
+		// ```markdownの長さを計算（改行まで含める）
+		const fenceEnd = content.indexOf("\n", firstFenceIndex);
+		const fenceLength = fenceEnd - firstFenceIndex + 1; // 改行文字も含める
+
+		// console.log(
+		// 	"先頭削除: ",
+		// 	content.substring(0, firstFenceIndex) +
+		// 		content.substring(firstFenceIndex + fenceLength)
+		// );
+
+		// 先頭のフェンスを削除
+		return (
+			content.substring(0, firstFenceIndex) +
+			content.substring(firstFenceIndex + fenceLength)
+		);
+	};
+
 	// アーティファクトの種類に応じたコンテンツをレンダリングする関数
 	const renderContent = () => {
 		console.log("ArtifactViewer: artifact type =", artifact.type);
-		const contentToRender = artifact.content || ""; // 全コンテンツを使用
+		let contentToRender = artifact.content || ""; // 全コンテンツを使用
 
-		console.log("contentToRender", contentToRender);
+		contentToRender = removeLeadingMarkdownFence(contentToRender);
+		contentToRender = removeTrailingCodeFence(contentToRender);
+		console.log("末尾の```を削除しました");
+
 		switch (artifact.type) {
 			case "code":
 				// codeタイプの場合は、指定された言語のコードブロックとして表示

@@ -161,11 +161,20 @@ export function extractMarkdownBlock(content: string): string | null {
 		const lines = content.split("\n");
 		// 少なくとも数行あり、かつマークダウンらしい要素が含まれていれば
 		if (lines.length > 3) {
-			console.log(
-				"マークダウンとして認識:",
-				content.substring(0, 100) + "..."
-			);
-			return content;
+			// 末尾の文がコードブロックで終わっていないことを確認
+			// 末尾にコードブロックが誤検出されないようにする
+			const lastLines = lines.slice(-3).join("\n").trim();
+			if (!lastLines.endsWith("```") && !lastLines.match(/^```\w*$/m)) {
+				console.log(
+					"マークダウンとして認識:",
+					content.substring(0, 100) + "..."
+				);
+				return content;
+			} else {
+				console.log(
+					"末尾がコードブロックの開始で終わっている可能性があります。マークダウンとして認識しません。"
+				);
+			}
 		}
 	}
 
