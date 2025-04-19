@@ -210,13 +210,27 @@ export const ArtifactView: React.FC<ArtifactViewProps> = ({
 											? match[1].toLowerCase()
 											: "";
 
+									// 入れ子コードブロック向けの特別処理
+									let content = "";
+									if (Array.isArray(children)) {
+										content = children
+											.map((child) => {
+												if (typeof child === "string")
+													return child;
+												return "";
+											})
+											.join("");
+									} else {
+										content = String(children);
+									}
+
 									if (inline) {
 										return (
 											<code
 												className={className}
 												{...props}
 											>
-												{children}
+												{content}
 											</code>
 										);
 									}
@@ -229,10 +243,13 @@ export const ArtifactView: React.FC<ArtifactViewProps> = ({
 												</div>
 											)}
 											<pre
-												className={`${className || ""} p-4 overflow-x-auto`}
+												className={`${className || ""} p-4 overflow-x-auto syntax-highlighted`}
 											>
-												<code {...props}>
-													{children}
+												<code
+													{...props}
+													className={`language-${lang || "text"}`}
+												>
+													{content}
 												</code>
 											</pre>
 										</div>
@@ -240,7 +257,106 @@ export const ArtifactView: React.FC<ArtifactViewProps> = ({
 								},
 							}}
 						>
-							{content}
+							{(() => {
+								// 入れ子コードブロックがある場合に処理
+								// ```markdownで始まり、内部に他のコードブロックがある場合を検出
+								let processedContent = content;
+
+								// マークダウンブロックがなければそのまま返す
+								if (!content.includes("```markdown")) {
+									return processedContent;
+								}
+
+								console.log(
+									"ArtifactView: ```markdownブロックを検出しました"
+								);
+
+								// マークダウンの元のコンテンツから実際の表示用コンテンツを再構築する
+								let result = "";
+
+								// 先頭の説明文などをそのまま追加
+								const startMarkdownBlock =
+									content.indexOf("```markdown");
+								if (startMarkdownBlock > 0) {
+									result +=
+										content
+											.substring(0, startMarkdownBlock)
+											.trim() + "\n\n";
+								}
+
+								// マークダウンブロック内のコンテンツを抽出
+								const markdownMatch =
+									/```markdown\s*([\s\S]*?)```/.exec(content);
+								if (!markdownMatch || !markdownMatch[1]) {
+									console.error(
+										"マークダウンブロックの内容が抽出できませんでした"
+									);
+									return content;
+								}
+
+								const markdownContent = markdownMatch[1];
+
+								// コードブロックのパターン（```言語名 から始まり ```で終わるブロック）
+								const codeBlockRegex = /```(\w+)([^`]*?)```/g;
+								let lastIndex = 0;
+								let match;
+
+								// マークダウンコンテンツ内の全てのコードブロックを検出して処理
+								while (
+									(match =
+										codeBlockRegex.exec(
+											markdownContent
+										)) !== null
+								) {
+									const lang = match[1];
+									const code = match[2];
+									const matchStart = match.index;
+									const matchEnd =
+										matchStart + match[0].length;
+
+									console.log(
+										`ArtifactView: コードブロック検出: 言語=${lang}`
+									);
+
+									// マークダウンブロックの前の部分を追加
+									result += markdownContent.substring(
+										lastIndex,
+										matchStart
+									);
+
+									// 言語付きコードブロックを追加（正しい構文で）
+									result +=
+										"\n```" +
+										lang +
+										"\n" +
+										code.trim() +
+										"\n```\n\n";
+
+									lastIndex = matchEnd;
+								}
+
+								// 残りのマークダウン内容を追加
+								if (lastIndex < markdownContent.length) {
+									result +=
+										markdownContent.substring(lastIndex);
+								}
+
+								// マークダウンブロック後の内容も追加
+								const endMarkdownBlock =
+									content.indexOf(
+										"```",
+										markdownMatch.index + 11
+									) + 3;
+								if (endMarkdownBlock < content.length) {
+									result +=
+										"\n\n" +
+										content
+											.substring(endMarkdownBlock)
+											.trim();
+								}
+
+								return result;
+							})()}
 						</ReactMarkdown>
 					</div>
 				)}

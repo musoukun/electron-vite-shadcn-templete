@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, memo } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -34,7 +34,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { highlight } from "remark-sugar-high";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { useChatLogic } from "@/hooks/useChatLogic";
 import { ArtifactViewer } from "@/components/artifacts";
 import { extractHtmlBlock, extractMarkdownBlock } from "@/utils/artifact-utils";
@@ -268,7 +269,8 @@ function AppContent() {
 				return (
 					<div className="nested-markdown-block rounded-lg bg-muted/50 p-4 my-4 border border-muted-foreground/20">
 						<ReactMarkdown
-							remarkPlugins={[remarkGfm, highlight]}
+							remarkPlugins={[remarkGfm, remarkMath]}
+							rehypePlugins={[rehypeKatex]}
 							components={{ a: markdownComponents.a }}
 						>
 							{content.trim() || ""}
@@ -628,7 +630,10 @@ function AppContent() {
 																<ReactMarkdown
 																	remarkPlugins={[
 																		remarkGfm,
-																		highlight,
+																		remarkMath,
+																	]}
+																	rehypePlugins={[
+																		rehypeKatex,
 																	]}
 																	components={
 																		markdownComponents

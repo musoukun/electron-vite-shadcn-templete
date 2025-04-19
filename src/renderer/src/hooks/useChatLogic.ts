@@ -536,48 +536,11 @@ export function useChatLogic() {
 			// エージェント用のスレッド一覧を読み込み
 			await loadThreads(agent.id);
 
-			try {
-				// 新しいスレッドを作成してそれを使用
-				const initialTitle = `${agent.name}との会話`;
-				const thread = await createNewThread(agent.id, initialTitle);
-				if (thread) {
-					setCurrentThreadId(thread.id);
-
-					// 空のチャット履歴を設定し、会話準備完了状態にする
-					setChatHistory([
-						{
-							role: "system",
-							content: `${agent.name}との新しい会話を開始しました。メッセージを入力してください。`,
-						},
-					]);
-				} else {
-					// スレッド作成に失敗した場合はスレッドIDなしで続行
-					setCurrentThreadId(null);
-
-					// 空のチャット履歴を設定し、会話準備完了状態にする
-					setChatHistory([
-						{
-							role: "system",
-							content: `${agent.name}との新しい会話を開始しました（メモリなし）。メッセージを入力してください。`,
-						},
-					]);
-				}
-			} catch (error) {
-				console.error("スレッド作成に失敗しました:", error);
-
-				// エラー時はスレッドIDなしで続行
-				setCurrentThreadId(null);
-
-				// 空のチャット履歴を設定し、会話準備完了状態にする
-				setChatHistory([
-					{
-						role: "system",
-						content: `${agent.name}との新しい会話を開始しました（メモリなし）。メッセージを入力してください。`,
-					},
-				]);
-			}
+			// 既存の会話履歴をクリアして準備状態にする
+			setChatHistory([]);
+			setCurrentThreadId(null);
 		},
-		[loadThreads, createNewThread]
+		[loadThreads]
 	);
 
 	// メッセージ送信処理
