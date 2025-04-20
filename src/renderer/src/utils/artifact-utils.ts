@@ -89,10 +89,10 @@ export function extractMarkdownBlock(content: string): string | null {
 	if (!content) return null;
 
 	// コンソールでデバッグ情報
-	console.log(
-		"マークダウン抽出処理開始: 元のコンテンツ長さ =",
-		content.length
-	);
+	// console.log(
+	// 	"マークダウン抽出処理開始: 元のコンテンツ長さ =",
+	// 	content.length
+	// );
 
 	// まず、content自体が明らかにマークダウンかを判断
 	// マークダウンによく使われるパターンを確認
@@ -190,7 +190,7 @@ export function extractHtmlBlock(content: string): string | null {
 	if (!content) return null;
 
 	// デバッグ情報
-	console.log("HTML抽出処理開始: 元のコンテンツ長さ =", content.length);
+	// console.log("HTML抽出処理開始: 元のコンテンツ長さ =", content.length);
 
 	// 1. ```html ... ``` パターンを探す
 	const htmlBlockRegex = /```html\s*([\s\S]*?)```/g;
